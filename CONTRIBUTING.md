@@ -9,6 +9,8 @@ Thank you for improving Git Master.
 3. Copy `.env.example` to `.env.local`.
 4. Run `npm run dev`.
 
+Desktop work additionally requires stable Rust and the platform packages from the official [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/). Start the Next.js server on port 5173, then run `npm run desktop:dev`.
+
 The demo workspace requires no GitHub or OpenAI credentials. Use a dedicated test repository and narrowly scoped token for integration work.
 
 ## Quality bar
@@ -20,9 +22,10 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
+npm run desktop:check
 ```
 
-Run `npm run test:e2e` for UI flows. Add tests for behavioral changes, document new environment variables, and keep provider keys on the server. A pull request that changes GitHub permissions, token handling, uploads, or external AI data flow must explain its security impact.
+Run `npm run test:e2e` for UI flows. `desktop:check` formats and tests the Rust companion and needs Tauri's native build prerequisites. Add tests for behavioral changes, document new environment variables, and keep provider keys on the server. A pull request that changes GitHub permissions, webhook handling, native input access, token handling, uploads, or external AI data flow must explain its security impact.
 
 ## Commits and pull requests
 

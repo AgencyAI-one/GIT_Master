@@ -12,6 +12,13 @@ type ClipboardFileSource = {
   files?: ArrayLike<File>;
 };
 
+type ClipboardReadSource = {
+  read: () => Promise<ArrayLike<{
+    types: readonly string[];
+    getType: (type: string) => Promise<Blob>;
+  }>>;
+};
+
 function attachmentKey(file: File) {
   return `${file.name}:${file.size}:${file.type}:${file.lastModified}`;
 }
@@ -42,6 +49,24 @@ export function clipboardImageFiles(source: ClipboardFileSource, timestamp = Dat
       lastModified: file.lastModified || timestamp,
     });
   });
+}
+
+export async function readClipboardImageFiles(source: ClipboardReadSource, timestamp = Date.now()) {
+  const items = Array.from(await source.read());
+  const images: File[] = [];
+
+  for (const item of items) {
+    const imageType = item.types.find((type) => type.startsWith("image/"));
+    if (!imageType) continue;
+    const blob = await item.getType(imageType);
+    const extension = imageType.split("/")[1]?.replace("jpeg", "jpg").replace(/[^a-z0-9]+/gi, "") || "png";
+    images.push(new File([blob], `clipboard-${timestamp}-${images.length + 1}.${extension}`, {
+      type: imageType,
+      lastModified: timestamp,
+    }));
+  }
+
+  return images;
 }
 
 function formatFileSize(bytes: number) {

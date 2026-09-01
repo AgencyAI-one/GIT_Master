@@ -82,6 +82,7 @@ export type VoiceCommand =
   | { action: "set_title"; value: string }
   | { action: "append_body"; value: string }
   | { action: "append_comment"; value: string }
+  | { action: "attach_clipboard_image"; value?: string }
   | { action: "submit_issue" }
   | { action: "search"; value: string }
   | { action: "refresh" }

@@ -55,6 +55,30 @@ describe("GitHub adapter", () => {
     expect(JSON.parse(String(init?.body))).toEqual(expect.objectContaining({ variables: { issue: "I_7" } }));
   });
 
+  it("updates a ProjectV2 item position relative to the previous item", async () => {
+    const fetcher = vi.fn<(url: string | URL | Request, init?: RequestInit) => Promise<Response>>(async () => jsonResponse({
+      data: { updateProjectV2ItemPosition: { items: { totalCount: 3 } } },
+    }));
+    const client = new GitHubClient("token", fetcher as unknown as typeof fetch, "https://api.github.test");
+
+    await client.updateProjectPosition({ projectId: "PVT_1", itemId: "ITEM_3", afterId: "ITEM_1" });
+
+    const [, init] = fetcher.mock.calls[0];
+    const request = JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> };
+    expect(request.query).toContain("updateProjectV2ItemPosition");
+    expect(request.variables).toEqual({ project: "PVT_1", item: "ITEM_3", after: "ITEM_1" });
+  });
+
+  it("moves a ProjectV2 item to the top with a null afterId", async () => {
+    const fetcher = vi.fn<(url: string | URL | Request, init?: RequestInit) => Promise<Response>>(async () => jsonResponse({ data: { updateProjectV2ItemPosition: { items: { totalCount: 2 } } } }));
+    const client = new GitHubClient("token", fetcher as unknown as typeof fetch, "https://api.github.test");
+
+    await client.updateProjectPosition({ projectId: "PVT_1", itemId: "ITEM_2", afterId: null });
+
+    const request = JSON.parse(String(fetcher.mock.calls[0][1]?.body)) as { variables: Record<string, unknown> };
+    expect(request.variables.after).toBeNull();
+  });
+
   it("updates and maps an issue comment", async () => {
     const fetcher = vi.fn(async () => jsonResponse({
       id: 91,

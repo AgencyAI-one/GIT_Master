@@ -7,6 +7,7 @@
 
 # production
 /build
+/src-tauri/target
 
 # local data and secrets
 /data

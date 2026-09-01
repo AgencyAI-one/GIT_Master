@@ -17,6 +17,7 @@ export function useVoiceRecorder(options: {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const discardRef = useRef(false);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
 
@@ -28,6 +29,7 @@ export function useVoiceRecorder(options: {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
       streamRef.current = stream;
       chunksRef.current = [];
+      discardRef.current = false;
       const mimeType = bestMimeType();
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       recorderRef.current = recorder;
@@ -37,6 +39,11 @@ export function useVoiceRecorder(options: {
       recorder.onstop = async () => {
         stream.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
+        if (discardRef.current) {
+          chunksRef.current = [];
+          discardRef.current = false;
+          return;
+        }
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
         if (!blob.size) return;
         setTranscribing(true);
@@ -67,7 +74,14 @@ export function useVoiceRecorder(options: {
     setRecording(false);
   }, []);
 
+  const cancel = useCallback(() => {
+    discardRef.current = true;
+    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+    else streamRef.current?.getTracks().forEach((track) => track.stop());
+    setRecording(false);
+  }, []);
+
   const toggle = useCallback(() => (recording ? stop() : void start()), [recording, start, stop]);
 
-  return { recording, transcribing, toggle, start, stop };
+  return { recording, transcribing, toggle, start, stop, cancel };
 }

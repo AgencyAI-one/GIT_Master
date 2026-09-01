@@ -37,6 +37,37 @@ function cleanCommandValue(value: string) {
   return value.trim().replace(/^[«“\"']+|[»”\"'.,!?;:]+$/g, "").trim();
 }
 
+function clipboardImageCommand(text: string): VoiceCommand | undefined {
+  const screenshot = "(?:скріншот|скриншот|скрін|скрин|знімок(?:\\s+екрана)?|картинку|зображення|фото)";
+  const clipboard = "(?:буфера(?:\\s+обміну)?|clipboard)";
+  const object = `(?:${screenshot}|clipboard\\s+(?:image|picture))`;
+  const optionalSource = `(?:\\s+(?:з|із|from)\\s+(?:(?:the)\\s+)?${clipboard})?`;
+  const ukrainianExact = new RegExp(
+    `^(?:додай|додати|встав|вставити|прикріпи|прикріпити|долучи|долучити|завантаж|завантажити)\\s+(?:будь\\s+ласка[,\\s]+)?(?:(?:цей|цю|це|останній|останню)\\s+)?${object}${optionalSource}(?:\\s+будь\\s+ласка)?\\s*[.!?]?$`,
+    "iu",
+  );
+  const englishExact = /^(?:add|attach|paste|insert|upload)\s+(?:please\s+)?(?:(?:the|this|last|a|an)\s+)?(?:screen\s*shot|clipboard\s+(?:image|picture)|(?:image|picture))(?:\s+from\s+(?:the\s+)?clipboard)?(?:\s+please)?\s*[.!?]?$/iu;
+  if (ukrainianExact.test(text) || englishExact.test(text)) return { action: "attach_clipboard_image" };
+
+  const embeddedPatterns = [
+    new RegExp(
+      `(^|[\\s,.;:!?—-])((?:додай|встав|прикріпи|долучи)\\s+(?:будь\\s+ласка[,\\s]+)?(?:(?:цей|цю|це|останній|останню)\\s+)?${screenshot}(?:\\s+(?:з|із)\\s+${clipboard})?(?:\\s+будь\\s+ласка)?)`,
+      "iu",
+    ),
+    /(^|[\s,.;:!?—-])((?:add|attach|paste|insert)\s+(?:please\s+)?(?:(?:the|this|last|a|an)\s+)?(?:screen\s*shot|clipboard\s+(?:image|picture)|(?:image|picture)\s+from\s+(?:the\s+)?clipboard)(?:\s+please)?)/iu,
+  ];
+
+  for (const pattern of embeddedPatterns) {
+    const match = pattern.exec(text);
+    if (match?.index === undefined || !match[2]) continue;
+    const commandStart = match.index + match[1].length;
+    const before = text.slice(0, commandStart).replace(/[\s,;:—-]+$/u, "").trim();
+    const after = text.slice(commandStart + match[2].length).replace(/^[\s,;:—-]+/u, "").trim();
+    const value = [before, after].filter(Boolean).join(" ").replace(/\s+([,.!?;:])/g, "$1").trim();
+    return { action: "attach_clipboard_image", ...(value ? { value } : {}) };
+  }
+}
+
 export function parseIssueManagementCommand(text: string, configured?: VoiceCommandSettings): VoiceCommand {
   const normalized = text.trim();
   if (!normalized) return { action: "unknown" };
@@ -91,6 +122,9 @@ export function parseVoiceCommand(text: string, settings?: VoiceCommandSettings)
   const managementCommand = parseIssueManagementCommand(normalized, settings);
   if (managementCommand.action !== "unknown") return managementCommand;
 
+  const clipboardCommand = clipboardImageCommand(normalized);
+  if (clipboardCommand) return clipboardCommand;
+
   if (/^(відкрий|створи|додай|почни).{0,18}(задач|таск|issue)|^(open|create|new).{0,12}(task|issue)/i.test(lower)) {
     return { action: "open_create" };
   }
@@ -130,7 +164,11 @@ export function parseVoiceCommand(text: string, settings?: VoiceCommandSettings)
   return { action: "unknown", value: normalized };
 }
 
-export function parseEditorVoiceInput(text: string, settings?: VoiceCommandSettings): VoiceCommand {
+export function parseEditorVoiceInput(
+  text: string,
+  settings?: VoiceCommandSettings,
+  target: "body" | "comment" = "body",
+): VoiceCommand {
   const normalized = text.trim();
   if (!normalized) return { action: "unknown" };
 
@@ -151,9 +189,9 @@ export function parseEditorVoiceInput(text: string, settings?: VoiceCommandSetti
   if (cancelPatterns.some((pattern) => pattern.test(normalized))) return { action: "close_panel" };
 
   const explicit = parseVoiceCommand(normalized, settings);
-  if (["open_issue", "delete_issue", "move_issue", "set_title", "append_body", "append_comment", "submit_issue", "close_panel"].includes(explicit.action)) return explicit;
+  if (["open_issue", "delete_issue", "move_issue", "set_title", "append_body", "append_comment", "attach_clipboard_image", "submit_issue", "close_panel"].includes(explicit.action)) return explicit;
 
-  return { action: "append_body", value: normalized };
+  return { action: target === "comment" ? "append_comment" : "append_body", value: normalized };
 }
 
 async function openaiRequest<T>(path: string, init: RequestInit): Promise<T> {
@@ -228,14 +266,17 @@ export async function interpretVoiceCommand(text: string, context?: Record<strin
   const voiceCommands = normalizeVoiceCommandSettings(context?.voiceCommands);
   const managementCommand = parseIssueManagementCommand(text, voiceCommands);
   if (managementCommand.action !== "unknown") return managementCommand;
-  if (context?.editorOpen === true) return parseEditorVoiceInput(text, voiceCommands);
+  if (context?.editorOpen === true) {
+    const target = context.editorTarget === "comment" ? "comment" : "body";
+    return parseEditorVoiceInput(text, voiceCommands, target);
+  }
   if (!getConfig().openaiApiKey) return parseVoiceCommand(text, voiceCommands);
   try {
     const result = await chatJson<{ action: VoiceCommand["action"]; value?: string }>(
-      `You are the command router for Git Master, a GitHub issue manager. Understand Ukrainian, English, and mixed Ukrainian-English developer speech. Allowed actions: open_create, set_title, append_body, append_comment, submit_issue, search, refresh, close_panel, unknown. Never invent content. Return JSON with action and optional value. "Create/open a task" means open_create; only explicit publish/save/submit means submit_issue.`,
+      `You are the command router for Git Master, a GitHub issue manager. Understand Ukrainian, English, and mixed Ukrainian-English developer speech. Allowed actions: open_create, set_title, append_body, append_comment, attach_clipboard_image, submit_issue, search, refresh, close_panel, unknown. Use attach_clipboard_image only when the speaker explicitly asks to add, attach, or paste a screenshot or clipboard image. Never invent content. Return JSON with action and optional value. "Create/open a task" means open_create; only explicit publish/save/submit means submit_issue.`,
       `Workspace context: ${JSON.stringify(context || {})}\nSpoken command: ${text}`,
     );
-    const allowed = new Set(["open_create", "set_title", "append_body", "append_comment", "submit_issue", "search", "refresh", "close_panel", "unknown"]);
+    const allowed = new Set(["open_create", "set_title", "append_body", "append_comment", "attach_clipboard_image", "submit_issue", "search", "refresh", "close_panel", "unknown"]);
     if (!allowed.has(result.action)) return parseVoiceCommand(text, voiceCommands);
     if (result.action === "unknown") return { action: "unknown", value: text.trim() };
     return result as VoiceCommand;

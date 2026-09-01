@@ -1,0 +1,19 @@
+[package]
+name = "git-master-desktop"
+version = "0.1.0"
+description = "Native global push-to-talk companion for Git Master"
+authors = ["Git Master contributors"]
+edition = "2021"
+rust-version = "1.77.2"
+license = "MIT"
+
+[build-dependencies]
+tauri-build = { version = "2.6.1", features = [] }
+
+[dependencies]
+rdev = "0.5.3"
+tauri = { version = "2.11.5", features = ["tray-icon"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

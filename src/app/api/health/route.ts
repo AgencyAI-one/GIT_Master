@@ -7,6 +7,7 @@ export async function GET() {
     return NextResponse.json({
       status: config.usingUnsafeDefaults ? "degraded" : "ok",
       voice: Boolean(config.openaiApiKey),
+      webhooks: Boolean(config.githubWebhookSecret),
       unsafeDefaults: config.usingUnsafeDefaults,
       version: process.env.npm_package_version || "0.1.0",
     });

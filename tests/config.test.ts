@@ -12,8 +12,10 @@ describe("configuration", () => {
       APP_PASSWORD: "password",
       APP_SECRET: "this-is-a-secret-that-is-long-enough-for-production",
       ENCRYPTION_KEY: "a".repeat(64),
+      GITHUB_WEBHOOK_SECRET: "webhook-secret",
     });
     expect(config.encryptionKey).toHaveLength(32);
     expect(config.usingUnsafeDefaults).toBe(false);
+    expect(config.githubWebhookSecret).toBe("webhook-secret");
   });
 });

@@ -65,21 +65,30 @@ When an issue drawer is open, routing becomes deterministic and does not require
 - explicit Save commands such as “Збережи задачу”, “Збережи і закрий”, or “Save this issue” submit the issue;
 - explicit Cancel commands such as “Скасуй задачу”, “Відміни створення”, or “Close without saving” close the drawer without writing;
 - explicit title, description, and comment commands preserve their specialized action;
-- every other Ukrainian, English, or mixed fragment is appended to the issue description as a new paragraph.
+- every other Ukrainian, English, or mixed fragment is appended to the active editor target: the issue description on Details, the new-comment composer on Comments, or the existing comment currently being edited.
 
 The transcription request intentionally leaves the single `language` parameter unset for code-switching and supplies a bilingual Ukrainian-English prompt with GitHub and existing editor context instead. This matches the app's intended speech profile while preserving English identifiers inside Ukrainian sentences.
 
 ## Push-to-talk keyboard control
 
-The global voice shortcut defaults to `Alt+V`:
+The focused-web-app voice shortcut defaults to the left `Alt` key:
 
-- hold the combination to record and release it to finish;
-- press it twice within 300 ms to latch the recorder without holding the keys;
-- press the same combination once or twice again to stop a latched recording;
-- switching windows safely stops the current recording.
+- hold Alt by itself to record and release it to finish;
+- press it twice within 300 ms to latch the recorder without holding the key;
+- press it once or twice again to stop a latched recording;
+- pressing another key or mouse button while Alt is down cancels and discards the attempt, so Alt-based operating-system shortcuts keep their normal behavior;
+- the previous `Alt+V` default is migrated automatically, while explicitly customized bindings remain unchanged.
 
 The new-issue shortcut defaults to `Alt+N` and opens the editor for the active repository. Both bindings are configurable in **Settings → Гарячі клавіші** and persist in browser `localStorage`. Physical `KeyboardEvent.code` values are stored so bindings remain stable when the keyboard layout changes. Plain unmodified shortcuts are ignored in form and editable fields.
 
+### Native global control
+
+The optional Tauri companion loads the configured Git Master server and injects only a desktop marker plus DOM events for voice press, release, and cancellation. A Rust listener observes global input without suppressing, storing, or logging it. Only left Alt starts voice capture; right Alt/AltGr is ignored, and any combined gesture cancels the recording before its audio is sent.
+
+Tauri's standard global-shortcut plugin cannot register a modifier by itself, so the companion uses an explicit, tested state machine around the native input listener. Windows and macOS are supported; macOS requires Accessibility and Microphone permission. Linux support currently requires X11 because the native listener does not receive global events under Wayland.
+
+The global desktop key is intentionally fixed to left Alt. Settings continue to configure the focused browser shortcut and the new-issue shortcut.
+
 ## Privacy
 
-Audio is sent directly from the Git Master server to the configured OpenAI API and is not stored by Git Master. Browser blobs become eligible for garbage collection after transcription. Consult the provider's current data controls and your organization's policy before processing sensitive speech.
+Audio is sent directly from the Git Master server to the configured OpenAI API and is not stored by Git Master. Cancelled Alt combinations discard the browser blob before transcription. Browser blobs become eligible for garbage collection after transcription. Consult the provider's current data controls and your organization's policy before processing sensitive speech.

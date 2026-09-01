@@ -11,11 +11,20 @@ import type { Board, BoardIssue, Connection, Project, Repository, StatusOption, 
 import { FALLBACK_STATUSES } from "@/lib/constants";
 import { api, jsonInit } from "@/lib/client-api";
 import { cn } from "@/lib/cn";
+import { boardEventMatches, type BoardChangedEvent } from "@/lib/live-events";
+import {
+  applyStoredBoardOrder,
+  boardIssueKey,
+  issueBeforeInStatus,
+  parseStoredBoardOrder,
+  reorderBoardIssues,
+} from "@/lib/board-order";
 import {
   DEFAULT_SHORTCUTS,
   formatShortcut,
   hasShortcutModifier,
   isEditableShortcutTarget,
+  isModifierOnlyShortcut,
   matchesShortcut,
   parseShortcutSettings,
   PushToTalkController,
@@ -59,8 +68,16 @@ const demoIssues: BoardIssue[] = [
 
 const initialDemoBoard: Board = { source: "demo", statuses: FALLBACK_STATUSES, issues: demoIssues };
 
+function desktopCompanionControlsAlt() {
+  return Boolean((window as typeof window & { __GIT_MASTER_DESKTOP__?: boolean }).__GIT_MASTER_DESKTOP__);
+}
+
 function normalizedStatus(value: string) {
   return value.trim().replace(/^[«“\"']+|[»”\"'.,!?;:]+$/g, "").replace(/\s+/g, " ").toLocaleLowerCase("uk-UA");
+}
+
+function repositoryBoardOrderKey(connectionId: string, repository: string) {
+  return `git-master-board-order:${connectionId}:${repository}`;
 }
 
 export function Workspace() {
@@ -84,10 +101,12 @@ export function Workspace() {
   const [moving, setMoving] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [editorCommand, setEditorCommand] = useState<EditorVoiceCommand>();
+  const [editorVoiceTarget, setEditorVoiceTarget] = useState<"body" | "comment">("body");
   const [shortcuts, setShortcuts] = useState<ShortcutSettings>(DEFAULT_SHORTCUTS);
   const [voiceCommands, setVoiceCommands] = useState<VoiceCommandSettings>(DEFAULT_VOICE_COMMANDS);
   const [voiceLatched, setVoiceLatched] = useState(false);
   const boardRequestId = useRef(0);
+  const liveRefreshTimer = useRef<number | null>(null);
   const voiceCenterRef = useRef<VoiceCommandHandle>(null);
   const activeVoiceKeyRef = useRef("");
   const pushToTalkRef = useRef<PushToTalkController | null>(null);
@@ -97,6 +116,8 @@ export function Workspace() {
       () => voiceCenterRef.current?.start(),
       () => voiceCenterRef.current?.stop(),
       setVoiceLatched,
+      300,
+      () => voiceCenterRef.current?.cancel(),
     );
     pushToTalkRef.current = controller;
     return () => {
@@ -188,15 +209,26 @@ export function Workspace() {
     return () => { active = false; };
   }, [connectionId, repository]);
 
-  const loadBoard = useCallback(async () => {
+  const loadBoard = useCallback(async (background = false) => {
     if (!connectionId || !repository) return;
     const requestId = ++boardRequestId.current;
-    setLoadingBoard(true);
+    if (!background) setLoadingBoard(true);
     try {
       const query = new URLSearchParams({ connectionId, repository });
       if (projectId) query.set("projectId", projectId);
       const result = await api<{ board: Board }>(`/api/github/board?${query}`);
-      if (requestId === boardRequestId.current) setBoard(result.board);
+      if (requestId === boardRequestId.current) {
+        const nextBoard = result.board.source === "repository"
+          ? {
+              ...result.board,
+              issues: applyStoredBoardOrder(
+                result.board.issues,
+                parseStoredBoardOrder(window.localStorage.getItem(repositoryBoardOrderKey(connectionId, repository))),
+              ),
+            }
+          : result.board;
+        setBoard(nextBoard);
+      }
     } catch (error) {
       if (requestId === boardRequestId.current) {
         notify(error instanceof Error ? error.message : "Не вдалося завантажити дошку", "error");
@@ -207,6 +239,31 @@ export function Workspace() {
   }, [connectionId, repository, projectId, notify]);
 
   useEffect(() => { void loadBoard(); }, [loadBoard]);
+
+  useEffect(() => {
+    if (!connectionId || !repository || typeof EventSource === "undefined") return;
+    const events = new EventSource("/api/events");
+    const refresh = (message: MessageEvent<string>) => {
+      try {
+        const event = JSON.parse(message.data) as BoardChangedEvent;
+        if (!boardEventMatches(event, { repository, projectId })) return;
+        if (liveRefreshTimer.current) window.clearTimeout(liveRefreshTimer.current);
+        liveRefreshTimer.current = window.setTimeout(() => {
+          liveRefreshTimer.current = null;
+          void loadBoard(true);
+        }, 250);
+      } catch {
+        // Ignore malformed external events; EventSource will keep the connection alive.
+      }
+    };
+    events.addEventListener("board_changed", refresh as EventListener);
+    return () => {
+      events.removeEventListener("board_changed", refresh as EventListener);
+      events.close();
+      if (liveRefreshTimer.current) window.clearTimeout(liveRefreshTimer.current);
+      liveRefreshTimer.current = null;
+    };
+  }, [connectionId, loadBoard, projectId, repository]);
 
   const visibleBoard = useMemo<Board>(() => {
     const query = search.trim().toLowerCase();
@@ -246,21 +303,34 @@ export function Workspace() {
 
   const newIssue = useCallback((status?: StatusOption) => {
     if (!connectionId) { setConnectOpen(true); return; }
+    setEditorVoiceTarget("body");
     setEditingIssue(null);
     setInitialStatus(status || board.statuses.find((item) => item.name.toLowerCase() === "todo") || board.statuses[0]);
     setEditorOpen(true);
   }, [board.statuses, connectionId]);
+
+  const shortcutRuntimeRef = useRef({ connectOpen, editorOpen, newIssue, notify, settingsOpen, shortcuts });
+  useEffect(() => {
+    shortcutRuntimeRef.current = { connectOpen, editorOpen, newIssue, notify, settingsOpen, shortcuts };
+  }, [connectOpen, editorOpen, newIssue, notify, settingsOpen, shortcuts]);
 
   useEffect(() => {
     const controller = pushToTalkRef.current;
     if (!controller) return;
 
     const keydown = (event: KeyboardEvent) => {
-      if (connectOpen || settingsOpen) return;
+      const runtime = shortcutRuntimeRef.current;
+      if (runtime.connectOpen || runtime.settingsOpen) return;
       const editable = isEditableShortcutTarget(event.target);
 
-      if (matchesShortcut(event, shortcuts.voice)) {
-        if (editable && !hasShortcutModifier(shortcuts.voice)) return;
+      if (activeVoiceKeyRef.current && isModifierOnlyShortcut(runtime.shortcuts.voice) && event.code !== activeVoiceKeyRef.current) {
+        activeVoiceKeyRef.current = "";
+        controller.cancel();
+      }
+
+      if (matchesShortcut(event, runtime.shortcuts.voice)) {
+        if (desktopCompanionControlsAlt() && runtime.shortcuts.voice.code === "AltLeft") return;
+        if (editable && !hasShortcutModifier(runtime.shortcuts.voice)) return;
         event.preventDefault();
         if (event.repeat) return;
         activeVoiceKeyRef.current = event.code;
@@ -268,15 +338,15 @@ export function Workspace() {
         return;
       }
 
-      if (matchesShortcut(event, shortcuts.newIssue)) {
-        if (editable && !hasShortcutModifier(shortcuts.newIssue)) return;
+      if (matchesShortcut(event, runtime.shortcuts.newIssue)) {
+        if (editable && !hasShortcutModifier(runtime.shortcuts.newIssue)) return;
         event.preventDefault();
         if (event.repeat) return;
-        if (editorOpen) {
-          notify("Закрийте поточний редактор перед створенням нової задачі", "error");
+        if (runtime.editorOpen) {
+          runtime.notify("Закрийте поточний редактор перед створенням нової задачі", "error");
           return;
         }
-        newIssue();
+        runtime.newIssue();
       }
     };
 
@@ -289,49 +359,83 @@ export function Workspace() {
 
     const resetVoice = () => {
       activeVoiceKeyRef.current = "";
-      controller.reset();
+      controller.cancel();
     };
 
     window.addEventListener("keydown", keydown);
     window.addEventListener("keyup", keyup);
     window.addEventListener("blur", resetVoice);
+
+    const desktopPress = () => controller.press(Date.now());
+    const desktopRelease = () => controller.release(Date.now());
+    const desktopCancel = () => controller.cancel();
+    window.addEventListener("git-master:voice-pressed", desktopPress);
+    window.addEventListener("git-master:voice-released", desktopRelease);
+    window.addEventListener("git-master:voice-cancelled", desktopCancel);
     return () => {
       window.removeEventListener("keydown", keydown);
       window.removeEventListener("keyup", keyup);
       window.removeEventListener("blur", resetVoice);
+      window.removeEventListener("git-master:voice-pressed", desktopPress);
+      window.removeEventListener("git-master:voice-released", desktopRelease);
+      window.removeEventListener("git-master:voice-cancelled", desktopCancel);
       resetVoice();
     };
-  }, [connectOpen, editorOpen, newIssue, notify, settingsOpen, shortcuts]);
+  }, []);
 
   function openIssue(issue: BoardIssue) {
     if (board.source === "demo") { setConnectOpen(true); return; }
+    setEditorVoiceTarget("body");
     setEditingIssue(issue);
     setInitialStatus(undefined);
     setEditorOpen(true);
   }
 
-  async function moveIssue(issue: BoardIssue, status: StatusOption) {
-    if (board.source === "demo") {
-      setBoard((value) => ({ ...value, issues: value.issues.map((item) => item.id === issue.id ? { ...item, status: status.name } : item) }));
-      return true;
-    }
-    if (!connectionId || !repository) return false;
+  async function moveIssue(issue: BoardIssue, status: StatusOption, beforeIssue?: BoardIssue) {
     const previous = board;
+    const nextIssues = reorderBoardIssues(board.issues, issue, status.name, beforeIssue);
+    const movedIssue = nextIssues.find((item) => boardIssueKey(item) === boardIssueKey(issue));
+    if (!movedIssue) return false;
+    const statusChanged = normalizedStatus(issue.status) !== normalizedStatus(status.name);
+    const orderChanged = nextIssues.some((item, index) => boardIssueKey(item) !== boardIssueKey(board.issues[index]));
+    if (!statusChanged && !orderChanged) return true;
+
+    if (board.source === "project" && (!board.projectId || !issue.itemId)) {
+      notify("GitHub Project не повернув item ID, тому порядок неможливо синхронізувати", "error");
+      return false;
+    }
+
+    const previousIssue = issueBeforeInStatus(nextIssues, movedIssue);
+    if (board.source === "project" && previousIssue && !previousIssue.itemId) {
+      notify("Не вдалося визначити позицію попередньої задачі в GitHub Project", "error");
+      return false;
+    }
+
+    setBoard((value) => ({ ...value, issues: nextIssues }));
+    if (board.source === "demo") return true;
+    if (!connectionId || !repository) return false;
     setMoving(issue.id);
-    setBoard((value) => ({ ...value, issues: value.issues.map((item) => item.id === issue.id ? { ...item, status: status.name } : item) }));
     try {
-      await api("/api/github/status", jsonInit("PATCH", {
-        connectionId,
-        repository,
-        issueNumber: issue.number,
-        status: status.name,
-        labels: issue.labels.map((label) => label.name),
-        state: issue.state,
-        projectId: board.projectId,
-        itemId: issue.itemId,
-        fieldId: board.statusFieldId,
-        optionId: status.id,
-      }));
+      if (board.source === "repository" && !statusChanged) {
+        window.localStorage.setItem(repositoryBoardOrderKey(connectionId, repository), JSON.stringify(nextIssues.map(boardIssueKey)));
+      } else {
+        await api("/api/github/status", jsonInit("PATCH", {
+          connectionId,
+          repository,
+          issueNumber: issue.number,
+          status: status.name,
+          labels: issue.labels.map((label) => label.name),
+          state: issue.state,
+          projectId: board.projectId,
+          itemId: issue.itemId,
+          fieldId: board.statusFieldId,
+          optionId: status.id,
+          afterItemId: board.source === "project" && orderChanged ? previousIssue?.itemId || null : undefined,
+        }));
+        if (board.source === "repository") {
+          window.localStorage.setItem(repositoryBoardOrderKey(connectionId, repository), JSON.stringify(nextIssues.map(boardIssueKey)));
+        }
+      }
       return true;
     } catch (error) {
       setBoard(previous);
@@ -407,6 +511,10 @@ export function Workspace() {
     }
     if (command.action === "search") { setSearch(command.value); return; }
     if (command.action === "refresh") { await loadBoard(); return; }
+    if (command.action === "attach_clipboard_image" && !editorOpen) {
+      notify("Спочатку відкрийте або створіть задачу, до якої потрібно додати скріншот", "error");
+      return;
+    }
     if (command.action === "close_panel") {
       if (editorOpen) notify(editingIssue ? "Редагування закрито без збереження" : "Створення issue скасовано");
       setEditorOpen(false);
@@ -414,7 +522,10 @@ export function Workspace() {
     }
     if (command.action === "unknown") {
       if (editorOpen && command.value) {
-        setEditorCommand({ id: Date.now(), command: { action: "append_body", value: command.value } });
+        setEditorCommand({
+          id: Date.now(),
+          command: { action: editorVoiceTarget === "comment" ? "append_comment" : "append_body", value: command.value },
+        });
         return;
       }
       notify("Не зрозумів команду. Спробуйте сформулювати дію конкретніше.", "error");
@@ -503,7 +614,7 @@ export function Workspace() {
               <Search size={14} className="absolute left-3 top-2.5 text-[#92978f]" />
               <input id="global-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search issues" className="focus-ring h-9 w-44 rounded-full border border-[#dfe2dc] bg-white pl-8 pr-3 text-xs xl:w-56" />
             </div>
-            <button type="button" onClick={loadBoard} disabled={loadingBoard || board.source === "demo"} aria-label="Оновити" className="focus-ring grid h-9 w-9 place-items-center rounded-full text-[#676d66] hover:bg-[#e9ebe5] disabled:opacity-40"><RefreshCw size={16} className={loadingBoard ? "animate-spin" : ""} /></button>
+            <button type="button" onClick={() => void loadBoard()} disabled={loadingBoard || board.source === "demo"} aria-label="Оновити" className="focus-ring grid h-9 w-9 place-items-center rounded-full text-[#676d66] hover:bg-[#e9ebe5] disabled:opacity-40"><RefreshCw size={16} className={loadingBoard ? "animate-spin" : ""} /></button>
             <button type="button" aria-label="New issue" aria-keyshortcuts={formatShortcut(shortcuts.newIssue)} onClick={() => newIssue()} className="focus-ring inline-flex h-9 items-center gap-1.5 rounded-full bg-[#101315] px-3.5 text-xs font-semibold text-white transition hover:bg-[#292e30]"><Plus size={15} /><span className="hidden sm:inline">New issue</span><kbd className="ml-1 hidden text-[9px] font-medium text-white/45 xl:inline">{formatShortcut(shortcuts.newIssue)}</kbd></button>
           </div>
         </header>
@@ -530,7 +641,7 @@ export function Workspace() {
             {loadingBoard && (
               <div className="absolute inset-0 z-10 grid place-items-center bg-[#f5f6f2]/70 backdrop-blur-[1px]"><div className="flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-medium shadow"><LoaderCircle size={15} className="animate-spin text-[#739d30]" /> Синхронізація з GitHub</div></div>
             )}
-            <Kanban board={visibleBoard} onOpen={openIssue} onCreate={newIssue} onMove={async (issue, status) => { await moveIssue(issue, status); }} moving={moving} />
+            <Kanban board={visibleBoard} onOpen={openIssue} onCreate={newIssue} onMove={async (issue, status, beforeIssue) => { await moveIssue(issue, status, beforeIssue); }} moving={moving} />
           </div>
         </div>
       </section>
@@ -545,6 +656,7 @@ export function Workspace() {
         connectionId={connectionId}
         repository={repository}
         voiceCommand={editorCommand}
+        onVoiceTargetChange={setEditorVoiceTarget}
         onClose={() => setEditorOpen(false)}
         onSaved={handleIssueSaved}
         onDeleted={deleteIssueFromBoard}
@@ -552,13 +664,14 @@ export function Workspace() {
       />
       <VoiceCommandCenter
         ref={voiceCenterRef}
-        context={{ repository: repository || "demo", project: activeProject?.title, editorOpen, editingIssue: editingIssue?.number, issueTitle: editingIssue?.title, search, voiceCommands }}
+        context={{ repository: repository || "demo", project: activeProject?.title, editorOpen, editorTarget: editorVoiceTarget, editingIssue: editingIssue?.number, issueTitle: editingIssue?.title, search, voiceCommands }}
         onCommand={handleVoiceCommand}
         notify={notify}
         shortcutHint={formatShortcut(shortcuts.voice)}
         latched={voiceLatched}
         onReleaseLatch={() => pushToTalkRef.current?.reset()}
         editorMode={editorOpen}
+        editorTarget={editorVoiceTarget}
       />
     </main>
   );

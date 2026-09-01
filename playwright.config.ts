@@ -24,6 +24,7 @@ export default defineConfig({
       APP_PASSWORD: "playwright-password",
       APP_SECRET: "playwright-session-secret-with-more-than-thirty-two-characters",
       ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      GITHUB_WEBHOOK_SECRET: "playwright-webhook-secret",
       DATABASE_PATH: "./data/playwright.db",
     },
   },

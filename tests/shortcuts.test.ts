@@ -6,8 +6,10 @@ import {
 
 describe("keyboard shortcut bindings", () => {
   it("matches the physical key and exact modifiers", () => {
-    expect(matchesShortcut({ code: "KeyV", altKey: true, ctrlKey: false, shiftKey: false, metaKey: false }, DEFAULT_SHORTCUTS.voice)).toBe(true);
-    expect(matchesShortcut({ code: "KeyV", altKey: false, ctrlKey: false, shiftKey: false, metaKey: false }, DEFAULT_SHORTCUTS.voice)).toBe(false);
+    expect(matchesShortcut({ code: "AltLeft", altKey: true, ctrlKey: false, shiftKey: false, metaKey: false }, DEFAULT_SHORTCUTS.voice)).toBe(true);
+    expect(matchesShortcut({ code: "AltRight", altKey: true, ctrlKey: false, shiftKey: false, metaKey: false }, DEFAULT_SHORTCUTS.voice)).toBe(false);
+    expect(matchesShortcut({ code: "KeyV", altKey: true, ctrlKey: false, shiftKey: false, metaKey: false }, DEFAULT_SHORTCUTS.voice)).toBe(false);
+    expect(formatShortcut(DEFAULT_SHORTCUTS.voice)).toBe("Alt");
   });
 
   it("captures and formats a shortcut", () => {
@@ -17,9 +19,25 @@ describe("keyboard shortcut bindings", () => {
     expect(shortcutSignature(binding!)).toBe("CS:Space");
   });
 
+  it("captures a lone Alt key as a modifier-only shortcut", () => {
+    const binding = shortcutFromKeyboardEvent({ code: "AltLeft", altKey: true, ctrlKey: false, shiftKey: false, metaKey: false });
+    expect(binding).toEqual(DEFAULT_SHORTCUTS.voice);
+  });
+
   it("recovers safely from malformed persisted settings", () => {
     expect(parseShortcutSettings("not json")).toEqual(DEFAULT_SHORTCUTS);
     expect(parseShortcutSettings(JSON.stringify({ voice: { code: 2 } }))).toEqual(DEFAULT_SHORTCUTS);
+  });
+
+  it("migrates the previous Alt+V default while preserving custom shortcuts", () => {
+    expect(parseShortcutSettings(JSON.stringify({
+      voice: { code: "KeyV", alt: true, ctrl: false, shift: false, meta: false },
+      newIssue: DEFAULT_SHORTCUTS.newIssue,
+    })).voice).toEqual(DEFAULT_SHORTCUTS.voice);
+    expect(parseShortcutSettings(JSON.stringify({
+      voice: { code: "Space", alt: false, ctrl: true, shift: true, meta: false },
+      newIssue: DEFAULT_SHORTCUTS.newIssue,
+    })).voice.code).toBe("Space");
   });
 });
 
@@ -71,5 +89,17 @@ describe("push-to-talk controller", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(stop).toHaveBeenCalledOnce();
+  });
+
+  it("cancels and discards a recording when Alt becomes part of another shortcut", async () => {
+    const start = vi.fn();
+    const stop = vi.fn();
+    const cancel = vi.fn();
+    const controller = new PushToTalkController(start, stop, vi.fn(), 300, cancel);
+    controller.press(1000);
+    controller.cancel();
+    await Promise.resolve();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(stop).not.toHaveBeenCalled();
   });
 });

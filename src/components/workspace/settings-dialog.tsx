@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { AudioLines, Keyboard, RotateCcw, Save, X } from "lucide-react";
 import {
   DEFAULT_SHORTCUTS,
   formatShortcut,
+  isModifierOnlyShortcut,
   shortcutFromKeyboardEvent,
   shortcutSignature,
   type ShortcutBinding,
@@ -57,23 +58,43 @@ function ShortcutRecorder(props: {
   onChange: (value: ShortcutBinding) => void;
 }) {
   const [capturing, setCapturing] = useState(false);
+  const modifierCandidate = useRef<ShortcutBinding | null>(null);
 
   useEffect(() => {
     if (!capturing) return;
-    const capture = (event: KeyboardEvent) => {
+    const keydown = (event: KeyboardEvent) => {
       event.preventDefault();
       event.stopPropagation();
       if (event.key === "Escape") {
+        modifierCandidate.current = null;
         setCapturing(false);
         return;
       }
       const binding = shortcutFromKeyboardEvent(event);
       if (!binding) return;
+      if (isModifierOnlyShortcut(binding)) {
+        modifierCandidate.current = binding;
+        return;
+      }
+      modifierCandidate.current = null;
       props.onChange(binding);
       setCapturing(false);
     };
-    window.addEventListener("keydown", capture, true);
-    return () => window.removeEventListener("keydown", capture, true);
+    const keyup = (event: KeyboardEvent) => {
+      if (!modifierCandidate.current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      props.onChange(modifierCandidate.current);
+      modifierCandidate.current = null;
+      setCapturing(false);
+    };
+    window.addEventListener("keydown", keydown, true);
+    window.addEventListener("keyup", keyup, true);
+    return () => {
+      modifierCandidate.current = null;
+      window.removeEventListener("keydown", keydown, true);
+      window.removeEventListener("keyup", keyup, true);
+    };
   }, [capturing, props]);
 
   return (
@@ -186,7 +207,7 @@ export function SettingsDialog(props: {
               <div className="rounded-2xl border border-[#e0e3dc] bg-white px-4 sm:px-5">
                 <ShortcutRecorder
                   label="Голосова команда"
-                  detail="Утримуйте клавіші як кнопку рації. Подвійне натискання залишає запис увімкненим до наступного натискання."
+                  detail="Типово це один лівий Alt: утримуйте як кнопку рації або двічі натисніть для фіксації запису."
                   value={draft.voice}
                   onChange={(voice) => setDraft((current) => ({ ...current, voice }))}
                 />
@@ -199,7 +220,7 @@ export function SettingsDialog(props: {
               </div>
 
               <p className="mt-4 text-[11px] leading-5 text-[#858b83]">
-                Натисніть поле комбінації, а потім потрібні клавіші. Комбінації зберігаються лише в цьому браузері. Звичайні клавіші без модифікаторів не спрацьовують під час введення тексту.
+                Натисніть поле комбінації, а потім потрібні клавіші. Комбінації зберігаються лише в цьому браузері. Tauri companion завжди використовує лівий Alt глобально. Звичайні клавіші без модифікаторів не спрацьовують під час введення тексту.
               </p>
 
               <section className="mt-8">

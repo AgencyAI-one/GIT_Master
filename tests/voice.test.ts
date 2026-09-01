@@ -9,6 +9,8 @@ describe("voice command fallback", () => {
     ["Set title to Fix broken login", { action: "set_title", value: "Fix broken login" }],
     ["Додай коментар перевірено на staging", { action: "append_comment", value: "перевірено на staging" }],
     ["Додай в опис критерії приймання", { action: "append_body", value: "критерії приймання" }],
+    ["Додай скріншот", { action: "attach_clipboard_image" }],
+    ["Attach image from clipboard", { action: "attach_clipboard_image" }],
     ["Знайди задачі авторизація", { action: "search", value: "авторизація" }],
     ["Опублікуй задачу", { action: "submit_issue" }],
     ["Онови дошку з задачами", { action: "refresh" }],
@@ -80,6 +82,15 @@ describe("voice input while the issue editor is open", () => {
     ["Відмінити завдання", { action: "close_panel" }],
     ["Close without saving", { action: "close_panel" }],
     ["Set title to Fix mixed auth", { action: "set_title", value: "Fix mixed auth" }],
+    ["Додати скриншот", { action: "attach_clipboard_image" }],
+    ["Встав знімок екрана з буфера обміну", { action: "attach_clipboard_image" }],
+    ["Прикріпи картинку з clipboard", { action: "attach_clipboard_image" }],
+    ["Paste the screenshot from the clipboard", { action: "attach_clipboard_image" }],
+    ["Add clipboard image", { action: "attach_clipboard_image" }],
+    ["Додай скрін", { action: "attach_clipboard_image" }],
+    ["Встав скриншот", { action: "attach_clipboard_image" }],
+    ["Долучи знімок", { action: "attach_clipboard_image" }],
+    ["Додай картинку", { action: "attach_clipboard_image" }],
   ])("routes the explicit editor command %s", (spoken, command) => {
     expect(parseEditorVoiceInput(spoken)).toEqual(command);
   });
@@ -93,10 +104,63 @@ describe("voice input while the issue editor is open", () => {
     expect(parseEditorVoiceInput(spoken)).toEqual({ action: "append_body", value: spoken });
   });
 
+  it.each([
+    [
+      "Потрібно виправити форму, встав скріншот, і перевірити mobile layout",
+      "Потрібно виправити форму і перевірити mobile layout",
+    ],
+    [
+      "Онови документацію і додай скрін з буфера обміну потім запусти тести",
+      "Онови документацію і потім запусти тести",
+    ],
+    [
+      "Implement the login flow, attach screenshot, and cover mobile",
+      "Implement the login flow and cover mobile",
+    ],
+    [
+      "Опиши помилку, встав скрін, потім вкажи браузер",
+      "Опиши помилку потім вкажи браузер",
+    ],
+    [
+      "Перевір темну тему, долучи знімок, і створи regression test",
+      "Перевір темну тему і створи regression test",
+    ],
+    [
+      "Відтвори проблему, додай картинку з буфера обміну, і запиши expected result",
+      "Відтвори проблему і запиши expected result",
+    ],
+  ])("keeps surrounding dictation while routing an embedded screenshot command: %s", (spoken, value) => {
+    expect(parseEditorVoiceInput(spoken)).toEqual({ action: "attach_clipboard_image", value });
+  });
+
+  it("does not treat an infinitive product requirement as an embedded screenshot command", () => {
+    const spoken = "Потрібно додати картинку профілю на сторінку користувача";
+    expect(parseEditorVoiceInput(spoken)).toEqual({ action: "append_body", value: spoken });
+  });
+
   it("uses deterministic dictation routing when the editor context is active", async () => {
     await expect(interpretVoiceCommand("Implement token refresh після login", { editorOpen: true })).resolves.toEqual({
       action: "append_body",
       value: "Implement token refresh після login",
+    });
+  });
+
+  it("routes ordinary dictation to the active comment composer", async () => {
+    const spoken = "Перевірив виправлення на staging";
+    expect(parseEditorVoiceInput(spoken, undefined, "comment")).toEqual({
+      action: "append_comment",
+      value: spoken,
+    });
+    await expect(interpretVoiceCommand(spoken, { editorOpen: true, editorTarget: "comment" })).resolves.toEqual({
+      action: "append_comment",
+      value: spoken,
+    });
+  });
+
+  it("keeps an explicit description command targeted at the body from the comments tab", () => {
+    expect(parseEditorVoiceInput("Додай в опис перевірку mobile layout", undefined, "comment")).toEqual({
+      action: "append_body",
+      value: "перевірку mobile layout",
     });
   });
 

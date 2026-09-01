@@ -11,3 +11,7 @@ updates:
     directory: /
     schedule:
       interval: monthly
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly

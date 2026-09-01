@@ -15,6 +15,7 @@ const actionLabels: Record<VoiceCommand["action"], string> = {
   set_title: "Змінюю назву",
   append_body: "Додаю до опису",
   append_comment: "Додаю коментар",
+  attach_clipboard_image: "Додаю скріншот із clipboard",
   submit_issue: "Публікую issue",
   search: "Шукаю задачі",
   refresh: "Оновлюю дошку",
@@ -25,6 +26,7 @@ const actionLabels: Record<VoiceCommand["action"], string> = {
 export type VoiceCommandHandle = {
   start: () => Promise<void> | void;
   stop: () => void;
+  cancel: () => void;
   toggle: () => void;
 };
 
@@ -36,6 +38,7 @@ export const VoiceCommandCenter = forwardRef<VoiceCommandHandle, {
   latched: boolean;
   onReleaseLatch: () => void;
   editorMode: boolean;
+  editorTarget?: "body" | "comment";
 }>(function VoiceCommandCenter(props, ref) {
   const [transcript, setTranscript] = useState("");
   const [result, setResult] = useState("");
@@ -86,7 +89,7 @@ export const VoiceCommandCenter = forwardRef<VoiceCommandHandle, {
     voice.toggle();
   }, [props, voice]);
 
-  useImperativeHandle(ref, () => ({ start, stop: voice.stop, toggle }), [start, toggle, voice.stop]);
+  useImperativeHandle(ref, () => ({ start, stop: voice.stop, cancel: voice.cancel, toggle }), [start, toggle, voice.cancel, voice.stop]);
 
   return (
     <div className="fixed bottom-5 right-5 z-30 flex flex-col items-end gap-3 sm:bottom-7 sm:right-7">
@@ -112,7 +115,7 @@ export const VoiceCommandCenter = forwardRef<VoiceCommandHandle, {
             ) : (
               <div className="text-xs leading-5 text-[#777d75]">
                 {props.editorMode ? (
-                  <><p>Наступний запис буде додано до опису. Можна диктувати кілька фрагментів поспіль.</p><p className="mt-2">Команди: “Збережи задачу” · “Скасуй задачу”.</p></>
+                  <><p>{props.editorTarget === "comment" ? "Наступний запис буде додано до активного коментаря." : "Наступний запис буде додано до опису."} Можна диктувати кілька фрагментів поспіль.</p><p className="mt-2">Команди: “Збережи задачу” · “Скасуй задачу”.</p></>
                 ) : (
                   <><p>Спробуйте: “Редагувати задачу 432” або “Move issue 432 to Review”.</p><p className="mt-2">Команди та їхні синоніми можна змінити в Settings.</p></>
                 )}

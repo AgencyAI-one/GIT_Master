@@ -6,7 +6,7 @@ import { ArrowUpRight, Check, CircleDot, FileText, LoaderCircle, MessageSquare, 
 import type { Board, BoardIssue, IssueComment, StatusOption, VoiceCommand } from "@/lib/types";
 import { api, jsonInit } from "@/lib/client-api";
 import { cn } from "@/lib/cn";
-import { TextComposer } from "./text-composer";
+import { MAX_ATTACHMENT_BYTES, mergeAttachmentFiles, readClipboardImageFiles, TextComposer } from "./text-composer";
 import { VoiceButton } from "./voice-button";
 
 export type EditorVoiceCommand = { id: number; command: VoiceCommand };
@@ -37,6 +37,7 @@ export function IssueDrawer(props: {
   connectionId?: string;
   repository?: string;
   voiceCommand?: EditorVoiceCommand;
+  onVoiceTargetChange: (target: "body" | "comment") => void;
   onClose: () => void;
   onSaved: (issue: BoardIssue) => Promise<void> | void;
   onDeleted: (issue: BoardIssue) => Promise<void> | void;
@@ -65,6 +66,8 @@ export function IssueDrawer(props: {
   const commentConnectionId = props.connectionId;
   const commentRepository = props.repository;
   const commentNotify = props.notify;
+  const notify = props.notify;
+  const onVoiceTargetChange = props.onVoiceTargetChange;
 
   const selectedStatus = props.board.statuses.find((status) => status.id === statusId) || props.board.statuses[0];
 
@@ -83,7 +86,8 @@ export function IssueDrawer(props: {
     setEditingCommentFiles([]);
     setDeleteConfirm(false);
     setTab("details");
-  }, [props.open, props.issue, props.initialStatus, props.board.statuses]);
+    onVoiceTargetChange("body");
+  }, [props.open, props.issue, props.initialStatus, props.board.statuses, onVoiceTargetChange]);
 
   const loadComments = useCallback(async () => {
     if (!commentIssue || !commentConnectionId || !commentRepository) return;
@@ -214,6 +218,41 @@ export function IssueDrawer(props: {
     }
   }, [props, selectedStatus, title, body, labels, files]);
 
+  const attachClipboardImage = useCallback(async () => {
+    if (!navigator.clipboard?.read) {
+      notify("Цей браузер не дозволяє читати зображення з clipboard. Вставте його через Ctrl/⌘+V у поле опису.", "error");
+      return;
+    }
+    try {
+      const clipboardFiles = await readClipboardImageFiles(navigator.clipboard);
+      if (!clipboardFiles.length) {
+        notify("У clipboard немає зображення. Скопіюйте скріншот і повторіть команду.", "error");
+        return;
+      }
+      const accepted = clipboardFiles.filter((file) => file.size <= MAX_ATTACHMENT_BYTES);
+      if (accepted.length !== clipboardFiles.length) {
+        notify("Скріншот завеликий — максимальний розмір файлу 10 MB.", "error");
+      }
+      if (!accepted.length) return;
+      const next = mergeAttachmentFiles(files, accepted);
+      const added = next.length - files.length;
+      if (!added) {
+        notify("Цей скріншот уже додано");
+        return;
+      }
+      setFiles(next);
+      setTab("details");
+      notify(added === 1 ? "Скріншот із clipboard додано до задачі" : `Додано ${added} зображення з clipboard`);
+    } catch (error) {
+      const name = error instanceof DOMException ? error.name : "";
+      if (name === "NotAllowedError" || name === "SecurityError") {
+        notify("Браузер не надав доступ до clipboard. Дозвольте доступ або вставте скріншот через Ctrl/⌘+V.", "error");
+        return;
+      }
+      notify("Не вдалося прочитати скріншот із clipboard. Спробуйте Ctrl/⌘+V.", "error");
+    }
+  }, [files, notify]);
+
   useEffect(() => {
     const payload = props.voiceCommand;
     if (!payload || payload.id === handledCommand.current || !props.open) return;
@@ -221,7 +260,17 @@ export function IssueDrawer(props: {
     const command = payload.command;
     if (command.action === "set_title") setTitle(command.value);
     if (command.action === "append_body") setBody((value) => appendText(value, command.value));
-    if (command.action === "append_comment") { setTab("comments"); setComment((value) => appendText(value, command.value)); }
+    if (command.action === "append_comment") {
+      setTab("comments");
+      onVoiceTargetChange("comment");
+      if (editingCommentId !== null) setEditingComment((value) => appendText(value, command.value));
+      else setComment((value) => appendText(value, command.value));
+    }
+    if (command.action === "attach_clipboard_image") {
+      const dictatedText = command.value;
+      if (dictatedText) setBody((value) => appendText(value, dictatedText));
+      void attachClipboardImage();
+    }
     if (command.action === "submit_issue") void save();
     if (command.action === "close_panel") props.onClose();
     if (command.action === "delete_issue" && props.issue) setDeleteConfirm(true);
@@ -229,7 +278,7 @@ export function IssueDrawer(props: {
       const target = props.board.statuses.find((status) => status.name.trim().toLocaleLowerCase("uk-UA") === command.targetStatus.trim().toLocaleLowerCase("uk-UA"));
       if (target) setStatusId(target.id);
     }
-  }, [props, save]);
+  }, [props, save, attachClipboardImage, editingCommentId, onVoiceTargetChange]);
 
   async function postComment() {
     if (!props.issue || !props.connectionId || !props.repository || (!comment.trim() && !commentFiles.length)) return;
@@ -337,8 +386,8 @@ export function IssueDrawer(props: {
 
             {props.issue && (
               <div className="flex h-12 shrink-0 items-end gap-5 border-b border-[#e5e7e2] px-5 sm:px-7">
-                <button type="button" onClick={() => setTab("details")} className={cn("flex h-full items-center gap-2 border-b-2 text-xs font-semibold", tab === "details" ? "border-[#101315] text-[#101315]" : "border-transparent text-[#8c928a]")}><FileText size={14} /> Деталі</button>
-                <button type="button" onClick={() => setTab("comments")} className={cn("flex h-full items-center gap-2 border-b-2 text-xs font-semibold", tab === "comments" ? "border-[#101315] text-[#101315]" : "border-transparent text-[#8c928a]")}><MessageSquare size={14} /> Коментарі <span className="text-[10px] font-medium">{comments.length || props.issue.commentCount || ""}</span></button>
+                <button type="button" onClick={() => { setTab("details"); onVoiceTargetChange("body"); }} className={cn("flex h-full items-center gap-2 border-b-2 text-xs font-semibold", tab === "details" ? "border-[#101315] text-[#101315]" : "border-transparent text-[#8c928a]")}><FileText size={14} /> Деталі</button>
+                <button type="button" onClick={() => { setTab("comments"); onVoiceTargetChange("comment"); }} className={cn("flex h-full items-center gap-2 border-b-2 text-xs font-semibold", tab === "comments" ? "border-[#101315] text-[#101315]" : "border-transparent text-[#8c928a]")}><MessageSquare size={14} /> Коментарі <span className="text-[10px] font-medium">{comments.length || props.issue.commentCount || ""}</span></button>
               </div>
             )}
 

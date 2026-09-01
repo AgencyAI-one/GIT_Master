@@ -7,11 +7,14 @@ Git Master is a single-process Next.js application designed for self-hosting. It
 ```mermaid
 sequenceDiagram
   participant U as Browser
+  participant T as Tauri companion
   participant A as Git Master API
   participant D as Encrypted SQLite
   participant G as GitHub API
   participant O as OpenAI API
+  participant W as GitHub Webhook
 
+  T->>U: Global Alt pressed/released/cancelled
   U->>A: Signed HTTP-only session
   A->>D: Read encrypted connection
   D-->>A: AES-GCM ciphertext
@@ -23,6 +26,9 @@ sequenceDiagram
   A->>O: Transcription request
   O-->>A: Transcript
   A-->>U: Text inserted at saved caret
+  W->>A: HMAC-signed board event
+  A-->>U: Authenticated SSE notification
+  U->>A: One debounced board reload
 ```
 
 The browser never receives `OPENAI_API_KEY`, `APP_SECRET`, `ENCRYPTION_KEY`, or a stored GitHub token.
@@ -37,6 +43,9 @@ src/lib/voice.ts         Transcription, title, and command adapter
 src/lib/db.ts            SQLite connection repository
 src/lib/auth.ts          Password sessions
 src/lib/crypto.ts        AES-256-GCM token envelope
+src/lib/github-webhook.ts Webhook verification and event normalization
+src/lib/live-events.ts   Single-process SSE pub/sub and board matching
+src-tauri/               Optional native global-Alt companion
 tests/                   Unit, adapter, and browser tests
 ```
 
@@ -54,6 +63,16 @@ status: done
 ```
 
 Closed issues are always displayed as Done. Moving a Done issue back reopens it.
+
+## Event-driven synchronization
+
+The browser holds one authenticated `EventSource` connection to `/api/events`. GitHub sends organization ProjectV2 item changes or repository issue activity to `/api/github/webhook`; the route verifies the raw payload with the configured SHA-256 HMAC secret and emits only a normalized board-change notification. A bounded recent-event buffer and SSE `Last-Event-ID` cover connection and reconnect races. Matching clients debounce related deliveries and perform one uncached board read. SSE keep-alive comments preserve the connection but never query GitHub, so this is push notification plus on-demand refresh rather than polling.
+
+The event hub is intentionally in process, matching Git Master's single-process self-hosting model. A multi-instance deployment must replace or bridge it with shared pub/sub. Organization ProjectV2 webhooks can target a board by exact project node ID. Repository issue events target the exact `owner/repository` name.
+
+## Desktop boundary
+
+Tauri is a companion shell, not a second backend. It loads `GIT_MASTER_URL`, keeps the normal signed web session in the operating-system WebView, and sends native key-state events into the same React command flow. It never reads SQLite, GitHub tokens, the OpenAI key, or the app password. No Tauri IPC command is exposed to the remotely loaded page.
 
 ## Persistence
 

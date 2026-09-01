@@ -7,6 +7,7 @@ export type AppConfig = {
   databasePath: string;
   githubApiUrl: string;
   githubUploadBranch?: string;
+  githubWebhookSecret?: string;
   openaiApiKey?: string;
   transcribeModel: string;
   textModel: string;
@@ -47,6 +48,7 @@ export function getConfig(env = process.env): AppConfig {
     databasePath: env.DATABASE_PATH || "./data/git-master.db",
     githubApiUrl: (env.GITHUB_API_URL || "https://api.github.com").replace(/\/$/, ""),
     githubUploadBranch: env.GITHUB_UPLOAD_BRANCH,
+    githubWebhookSecret: env.GITHUB_WEBHOOK_SECRET,
     openaiApiKey: env.OPENAI_API_KEY,
     transcribeModel: env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe",
     textModel: env.OPENAI_TEXT_MODEL || "gpt-4o-mini",

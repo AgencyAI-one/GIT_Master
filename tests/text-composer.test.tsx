@@ -5,6 +5,7 @@ import {
   insertAtSelection,
   MAX_ATTACHMENT_BYTES,
   mergeAttachmentFiles,
+  readClipboardImageFiles,
   TextComposer,
 } from "@/components/workspace/text-composer";
 
@@ -47,6 +48,32 @@ describe("attachment input", () => {
     expect(files).toHaveLength(1);
     expect(files[0].name).toBe("clipboard-1234-1.png");
     expect(files[0].type).toBe("image/png");
+  });
+
+  it("reads image blobs from the async Clipboard API", async () => {
+    const image = new Blob(["image"], { type: "image/png" });
+    const read = vi.fn().mockResolvedValue([
+      { types: ["text/plain"], getType: vi.fn() },
+      { types: ["image/png", "text/html"], getType: vi.fn().mockResolvedValue(image) },
+    ]);
+
+    const files = await readClipboardImageFiles({ read }, 5678);
+
+    expect(read).toHaveBeenCalledOnce();
+    expect(files).toHaveLength(1);
+    expect(files[0].name).toBe("clipboard-5678-1.png");
+    expect(files[0].type).toBe("image/png");
+    expect(files[0].size).toBe(image.size);
+  });
+
+  it("returns no files when the async clipboard has no image", async () => {
+    const getType = vi.fn();
+    const files = await readClipboardImageFiles({
+      read: vi.fn().mockResolvedValue([{ types: ["text/plain"], getType }]),
+    });
+
+    expect(files).toEqual([]);
+    expect(getType).not.toHaveBeenCalled();
   });
 
   it("adds files selected from disk", () => {

@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }, testInfo) => {
@@ -83,19 +84,21 @@ test("uses the voice shortcut as push-to-talk and latches on a double press", as
   await page.getByRole("button", { name: "Голосова команда" }).focus();
 
   await page.keyboard.down("Alt");
-  await page.keyboard.down("v");
+  await page.keyboard.press("Tab");
+  await page.keyboard.up("Alt");
+  await page.waitForTimeout(350);
+  expect(transcriptNumber).toBe(0);
+
+  await page.keyboard.down("Alt");
   await expect(page.getByText("Слухаю…")).toBeVisible();
-  await page.keyboard.up("v");
   await page.keyboard.up("Alt");
   await expect(page.getByText("перша команда")).toBeVisible();
 
-  await page.keyboard.down("Alt");
-  await page.keyboard.press("v");
+  await page.keyboard.press("Alt");
   await page.waitForTimeout(50);
-  await page.keyboard.press("v");
-  await page.keyboard.up("Alt");
+  await page.keyboard.press("Alt");
   await expect(page.getByText("Запис зафіксовано")).toBeVisible();
-  await page.keyboard.press("Alt+v");
+  await page.keyboard.press("Alt");
   await expect(page.getByText("друга команда")).toBeVisible();
 });
 
@@ -106,6 +109,7 @@ test("dictates multiple issue fragments and saves or cancels by voice", async ({
     "Відкрий нову задачу",
     "Потрібно додати українську валідацію",
     "Handle English error messages",
+    "Додай критерії доступності, встав скріншот, і перевір mobile layout",
     "Збережи задачу",
     "Open a new issue",
     "Temporary draft",
@@ -114,6 +118,7 @@ test("dictates multiple issue fragments and saves or cancels by voice", async ({
   let transcriptIndex = 0;
   const editorContexts: boolean[] = [];
   const createdBodies: string[] = [];
+  let attachmentUploads = 0;
 
   await page.addInitScript(({ connectionId, repository }) => {
     localStorage.setItem("git-master-connection", connectionId);
@@ -134,6 +139,15 @@ test("dictates multiple issue fragments and saves or cancels by voice", async ({
     const stream = { getTracks: () => [{ stop() {} }] };
     Object.defineProperty(window, "MediaRecorder", { configurable: true, value: FakeMediaRecorder });
     Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: async () => stream } });
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        read: async () => [{
+          types: ["image/png"],
+          getType: async () => new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" }),
+        }],
+      },
+    });
   }, { connectionId, repository });
   await page.route("**/api/connections", async (route) => route.fulfill({
     json: { connections: [{ id: connectionId, name: "Voice App", scopeType: "repository", owner: "acme", repository: "voice-app", login: "dev", createdAt: "2026-09-01T00:00:00Z" }] },
@@ -151,6 +165,7 @@ test("dictates multiple issue fragments and saves or cancels by voice", async ({
     editorContexts.push(payload.context.editorOpen === true);
     let command: { action: string; value?: string };
     if (/відкрий|open a new/i.test(payload.text)) command = { action: "open_create" };
+    else if (/скріншот/i.test(payload.text)) command = { action: "attach_clipboard_image", value: "Додай критерії доступності і перевір mobile layout" };
     else if (/збережи/i.test(payload.text)) command = { action: "submit_issue" };
     else if (/cancel/i.test(payload.text)) command = { action: "close_panel" };
     else command = { action: "append_body", value: payload.text };
@@ -166,35 +181,59 @@ test("dictates multiple issue fragments and saves or cancels by voice", async ({
       commentCount: 0, updatedAt: "2026-09-01T03:00:00Z",
     }, warnings: [] } });
   });
+  await page.route("**/api/github/attachments", async (route) => {
+    attachmentUploads += 1;
+    await route.fulfill({ status: 201, json: { attachment: { markdown: "![clipboard screenshot](https://github.test/clipboard.png)" } } });
+  });
+  await page.route("**/api/github/issues/7", async (route) => {
+    const payload = route.request().postDataJSON() as { body: string };
+    await route.fulfill({ json: { issue: {
+      id: "VOICE_1", nodeId: "VOICE_1", number: 7, title: "Bilingual voice task", body: payload.body, state: "open",
+      status: "Todo", url: "https://github.test/acme/voice-app/issues/7", repository, labels: [], assignees: [],
+      commentCount: 0, updatedAt: "2026-09-01T03:00:00Z",
+    } } });
+  });
 
   await page.goto("/login");
   await page.getByLabel("Пароль").fill("playwright-password");
   await page.getByRole("button", { name: "Відкрити workspace" }).click();
   await page.getByRole("button", { name: "Голосова команда" }).focus();
+  const speak = async () => {
+    await page.keyboard.down("Alt");
+    await expect(page.getByText("Слухаю…")).toBeVisible();
+    await page.waitForTimeout(320);
+    await page.keyboard.up("Alt");
+  };
 
-  await page.keyboard.press("Alt+v");
+  await speak();
+  await expect.poll(() => transcriptIndex).toBe(1);
   const drawer = page.getByRole("dialog", { name: "Нове issue" });
   await expect(drawer).toBeVisible();
 
   const description = page.getByPlaceholder("Опишіть очікуваний результат, контекст і критерії готовності…");
-  await page.keyboard.press("Alt+v");
+  await speak();
   await expect(description).toHaveValue("Потрібно додати українську валідацію");
-  await page.keyboard.press("Alt+v");
+  await speak();
   await expect(description).toHaveValue("Потрібно додати українську валідацію\n\nHandle English error messages");
-  await page.keyboard.press("Alt+v");
+  await speak();
+  await expect(drawer.getByText(/clipboard-\d+-1\.png/)).toBeVisible();
+  await expect(page.getByText("Скріншот із clipboard додано до задачі")).toBeVisible();
+  await expect(description).toHaveValue("Потрібно додати українську валідацію\n\nHandle English error messages\n\nДодай критерії доступності і перевір mobile layout");
+  await speak();
   await expect(drawer).toHaveCount(0);
   await expect(page.getByText("Bilingual voice task")).toBeVisible();
-  expect(createdBodies).toEqual(["Потрібно додати українську валідацію\n\nHandle English error messages"]);
+  expect(createdBodies).toEqual(["Потрібно додати українську валідацію\n\nHandle English error messages\n\nДодай критерії доступності і перевір mobile layout"]);
+  expect(attachmentUploads).toBe(1);
 
-  await page.keyboard.press("Alt+v");
+  await speak();
   await expect(drawer).toBeVisible();
-  await page.keyboard.press("Alt+v");
+  await speak();
   await expect(description).toHaveValue("Temporary draft");
-  await page.keyboard.press("Alt+v");
+  await speak();
   await expect(drawer).toHaveCount(0);
   await expect(page.getByText("Створення issue скасовано")).toBeVisible();
   expect(createdBodies).toHaveLength(1);
-  expect(editorContexts).toEqual([false, true, true, true, false, true, true]);
+  expect(editorContexts).toEqual([false, true, true, true, true, false, true, true]);
 });
 
 test("edits, moves, and requests deletion of a numbered issue by voice", async ({ page }) => {
@@ -263,19 +302,19 @@ test("edits, moves, and requests deletion of a numbered issue by voice", async (
   await page.getByRole("button", { name: "Відкрити workspace" }).click();
   await expect(page.getByText("Manage me by voice")).toBeVisible();
 
-  await page.keyboard.press("Alt+v");
+  await page.keyboard.press("Alt");
   const drawer = page.getByRole("dialog", { name: "Issue 432" });
   await expect(drawer).toBeVisible();
   await drawer.getByRole("button", { name: "Закрити", exact: true }).click();
 
-  await page.keyboard.press("Alt+v");
+  await page.keyboard.press("Alt");
   const reviewColumn = page.getByRole("region", { name: "Review column" });
   await expect(reviewColumn.getByText("Manage me by voice")).toBeVisible();
   expect(statusUpdates).toMatchObject([{ issueNumber: 432, status: "Review" }]);
 
   await expect(page.getByText("Issue #432 перенесено в «Review»")).toBeVisible();
   await page.waitForTimeout(500);
-  await page.keyboard.press("Alt+v");
+  await page.keyboard.press("Alt");
   await expect(drawer).toBeVisible();
   await expect(drawer.getByRole("button", { name: "Так, видалити" })).toBeVisible();
   expect(deleted).toBe(false);
@@ -301,10 +340,29 @@ test("shows a created issue immediately, edits a comment, and deletes the issue"
     id: 91, body: "Original comment", createdAt: "2026-09-01T00:00:00Z", updatedAt: "2026-09-01T00:00:00Z",
     url: "https://github.test/comment/91", author: { login: "dev", avatarUrl: "https://github.test/dev.png" },
   };
+  const voiceTranscripts = ["Voice note for the new comment", "Additional edit dictation"];
+  const voiceTargets: unknown[] = [];
+  let voiceTranscriptIndex = 0;
 
   await page.addInitScript(({ connectionId, repository }) => {
     localStorage.setItem("git-master-connection", connectionId);
     localStorage.setItem(`git-master-repository:${connectionId}`, repository);
+    class FakeMediaRecorder {
+      static isTypeSupported() { return true; }
+      state = "inactive";
+      mimeType = "audio/webm";
+      ondataavailable: ((event: { data: Blob }) => void) | null = null;
+      onstop: (() => void) | null = null;
+      start() { this.state = "recording"; }
+      stop() {
+        this.state = "inactive";
+        this.ondataavailable?.({ data: new Blob(["voice"]) });
+        this.onstop?.();
+      }
+    }
+    const stream = { getTracks: () => [{ stop() {} }] };
+    Object.defineProperty(window, "MediaRecorder", { configurable: true, value: FakeMediaRecorder });
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: async () => stream } });
   }, { connectionId, repository });
   await page.route("**/api/connections", async (route) => route.fulfill({
     json: { connections: [{ id: connectionId, name: "Acme", scopeType: "repository", owner: "acme", repository: "web", login: "dev", createdAt: "2026-09-01T00:00:00Z" }] },
@@ -316,6 +374,14 @@ test("shows a created issue immediately, edits a comment, and deletes the issue"
   await page.route("**/api/github/board?*", async (route) => route.fulfill({
     json: { board: { source: "repository", statuses: [{ id: "todo", name: "Todo" }, { id: "in-progress", name: "In progress" }, { id: "done", name: "Done" }], issues: [existingIssue] } },
   }));
+  await page.route("**/api/voice/transcribe", async (route) => route.fulfill({
+    json: { text: voiceTranscripts[voiceTranscriptIndex++] },
+  }));
+  await page.route("**/api/voice/command", async (route) => {
+    const payload = route.request().postDataJSON() as { text: string; context: { editorTarget?: unknown } };
+    voiceTargets.push(payload.context.editorTarget);
+    await route.fulfill({ json: { command: { action: "append_comment", value: payload.text } } });
+  });
   await page.route("**/api/github/issues", async (route) => route.fulfill({ status: 201, json: { issue: createdIssue, warnings: [] } }));
   await page.route("**/api/github/issues/1/comments?*", async (route) => route.fulfill({ json: { comments: [comment] } }));
   await page.route("**/api/github/issues/1/comments/91", async (route) => {
@@ -358,6 +424,15 @@ test("shows a created issue immediately, edits a comment, and deletes the issue"
   await page.getByRole("button", { name: /Коментарі/ }).click();
   await expect(page.getByText("Original comment")).toBeVisible();
   const newComment = drawer.getByPlaceholder("Додайте коментар текстом або голосом…");
+  const speak = async () => {
+    await page.keyboard.down("Alt");
+    await expect(page.getByText("Слухаю…")).toBeVisible();
+    await page.waitForTimeout(320);
+    await page.keyboard.up("Alt");
+  };
+  await speak();
+  await expect(newComment).toHaveValue("Voice note for the new comment");
+  expect(voiceTargets).toEqual(["comment"]);
   await newComment.evaluate((element) => {
     const transfer = new DataTransfer();
     transfer.items.add(new File([new Uint8Array([137, 80, 78, 71])], "clipboard-shot.png", { type: "image/png" }));
@@ -367,6 +442,10 @@ test("shows a created issue immediately, edits a comment, and deletes the issue"
 
   await page.getByRole("button", { name: "Редагувати коментар 91" }).click();
   const editedComment = drawer.getByPlaceholder("Відредагуйте коментар…");
+  await speak();
+  await expect(editedComment).toHaveValue("Original comment\n\nAdditional edit dictation");
+  await expect(newComment).toHaveValue("Voice note for the new comment");
+  expect(voiceTargets).toEqual(["comment", "comment"]);
   const editedCommentComposer = editedComment.locator("..");
   const editDrop = await page.evaluateHandle(() => {
     const transfer = new DataTransfer();
@@ -381,17 +460,32 @@ test("shows a created issue immediately, edits a comment, and deletes the issue"
   await expect(page.getByText("Updated comment")).toBeVisible();
 
   await page.getByRole("button", { name: "Деталі" }).click();
+  await expect(description).toHaveValue("Existing body");
   await page.getByRole("button", { name: "Видалити", exact: true }).click();
   await page.getByRole("button", { name: "Так, видалити" }).click();
   await expect(page.getByText("Existing task")).toHaveCount(0);
   await expect(page.getByText("Created without refresh")).toBeVisible();
 });
 
-test("demo cards can move between columns", async ({ page, isMobile }) => {
+test("demo cards can reorder within a column and move between columns", async ({ page, isMobile }) => {
   test.skip(Boolean(isMobile), "Native HTML drag-and-drop is a desktop interaction");
   await page.getByLabel("Пароль").fill("playwright-password");
   await page.getByRole("button", { name: "Відкрити workspace" }).click();
-  const card = page.getByRole("button", { name: /Command palette для швидкої навігації/ });
+  const todoColumn = page.getByRole("region", { name: "Todo column" });
+  const card = todoColumn.getByRole("button", { name: /Command palette для швидкої навігації/ });
+  const firstCard = todoColumn.getByRole("button", { name: /Підключення GitHub organization/ });
+  const firstCardBounds = await firstCard.boundingBox();
+  expect(firstCardBounds).not.toBeNull();
+
+  const reorderTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await card.dispatchEvent("dragstart", { dataTransfer: reorderTransfer });
+  await firstCard.dispatchEvent("dragover", { dataTransfer: reorderTransfer, clientY: firstCardBounds!.y + 1 });
+  await firstCard.dispatchEvent("drop", { dataTransfer: reorderTransfer, clientY: firstCardBounds!.y + 1 });
+  await expect.poll(async () => todoColumn.locator("h3").allTextContents()).toEqual([
+    "Command palette для швидкої навігації",
+    "Підключення GitHub organization з вибором репозиторіїв",
+  ]);
+
   const reviewColumn = page.getByRole("region", { name: "Review column" });
   const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
   await card.dispatchEvent("dragstart", { dataTransfer });
@@ -400,10 +494,11 @@ test("demo cards can move between columns", async ({ page, isMobile }) => {
   await expect(reviewColumn.getByText("Command palette для швидкої навігації")).toBeVisible();
 });
 
-test("a slower repository response cannot overwrite the selected Project board", async ({ page }) => {
+test("a slower repository response cannot overwrite the selected Project board", async ({ page, isMobile }) => {
   const connectionId = "race-connection";
   const repository = "acme/web";
   const projectId = "PVT_race";
+  let statusPayload: Record<string, unknown> | undefined;
   await page.addInitScript(({ connectionId, repository, projectId }) => {
     localStorage.setItem("git-master-connection", connectionId);
     localStorage.setItem(`git-master-repository:${connectionId}`, repository);
@@ -425,12 +520,19 @@ test("a slower repository response cannot overwrite the selected Project board",
     await route.fulfill({ json: { board: selectedProject ? {
       source: "project", projectId, statusFieldId: "STATUS",
       statuses: [{ id: "PROGRESS", name: "In progress" }, { id: "REVIEW", name: "In review" }, { id: "DONE", name: "Done" }],
-      issues: [{ id: "correct", nodeId: "I_1", itemId: "ITEM_1", number: 1, title: "Correct review issue", body: "", state: "open", status: "In review", statusOptionId: "REVIEW", url: "#", repository, labels: [], assignees: [], commentCount: 0, updatedAt: "2026-09-01T00:00:00Z" }],
+      issues: [
+        { id: "correct", nodeId: "I_1", itemId: "ITEM_1", number: 1, title: "Correct review issue", body: "", state: "open", status: "In review", statusOptionId: "REVIEW", url: "#", repository, labels: [], assignees: [], commentCount: 0, updatedAt: "2026-09-01T00:00:00Z" },
+        { id: "second", nodeId: "I_3", itemId: "ITEM_2", number: 3, title: "Second review issue", body: "", state: "open", status: "In review", statusOptionId: "REVIEW", url: "#", repository, labels: [], assignees: [], commentCount: 0, updatedAt: "2026-09-01T00:00:00Z" },
+      ],
     } : {
       source: "repository",
       statuses: [{ id: "in-progress", name: "In progress" }, { id: "review", name: "Review" }, { id: "done", name: "Done" }],
       issues: [{ id: "wrong", nodeId: "I_2", number: 2, title: "Wrong fallback issue", body: "", state: "open", status: "In progress", url: "#", repository, labels: [], assignees: [], commentCount: 0, updatedAt: "2026-09-01T00:00:00Z" }],
     } } });
+  });
+  await page.route("**/api/github/status", async (route) => {
+    statusPayload = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({ json: { ok: true } });
   });
 
   await page.goto("/login");
@@ -441,4 +543,87 @@ test("a slower repository response cannot overwrite the selected Project board",
   await expect(page.getByText("Correct review issue")).toBeVisible();
   await expect(page.getByText("Wrong fallback issue")).toHaveCount(0);
   await expect(page.getByText("GitHub Project", { exact: true })).toBeVisible();
+
+  if (!isMobile) {
+    const reviewColumn = page.getByRole("region", { name: "In review column" });
+    const first = reviewColumn.getByRole("button", { name: /Correct review issue/ });
+    const second = reviewColumn.getByRole("button", { name: /Second review issue/ });
+    const firstBounds = await first.boundingBox();
+    expect(firstBounds).not.toBeNull();
+    const transfer = await page.evaluateHandle(() => new DataTransfer());
+    await second.dispatchEvent("dragstart", { dataTransfer: transfer });
+    await first.dispatchEvent("dragover", { dataTransfer: transfer, clientY: firstBounds!.y + 1 });
+    await first.dispatchEvent("drop", { dataTransfer: transfer, clientY: firstBounds!.y + 1 });
+    await expect.poll(async () => reviewColumn.locator("h3").allTextContents()).toEqual(["Second review issue", "Correct review issue"]);
+    await expect.poll(() => statusPayload).toMatchObject({
+      projectId,
+      itemId: "ITEM_2",
+      fieldId: "STATUS",
+      optionId: "REVIEW",
+      afterItemId: null,
+    });
+  }
+});
+
+test("refreshes a Project board after a signed GitHub webhook without polling", async ({ page, request, isMobile }) => {
+  const client = isMobile ? "mobile" : "desktop";
+  const connectionId = `live-connection-${client}`;
+  const repository = `acme/live-app-${client}`;
+  const projectId = `PVT_live_${client}`;
+  let projectBoardReads = 0;
+
+  await page.addInitScript(({ connectionId, repository, projectId }) => {
+    localStorage.setItem("git-master-connection", connectionId);
+    localStorage.setItem(`git-master-repository:${connectionId}`, repository);
+    localStorage.setItem(`git-master-project:${repository}`, projectId);
+  }, { connectionId, repository, projectId });
+  await page.route("**/api/connections", async (route) => route.fulfill({
+    json: { connections: [{ id: connectionId, name: "Live App", scopeType: "organization", owner: "acme", login: "dev", createdAt: "2026-09-01T00:00:00Z" }] },
+  }));
+  await page.route("**/api/github/repositories?*", async (route) => route.fulfill({
+    json: { repositories: [{ id: 1, nodeId: "R_LIVE", name: "live-app", fullName: repository, owner: "acme", private: true, archived: false, defaultBranch: "main", url: "https://github.test/acme/live-app" }] },
+  }));
+  await page.route("**/api/github/projects?*", async (route) => route.fulfill({
+    json: { projects: [{ id: projectId, number: 1, title: "Live board", closed: false, url: "https://github.test/orgs/acme/projects/1" }] },
+  }));
+  await page.route("**/api/github/board?*", async (route) => {
+    const selected = new URL(route.request().url()).searchParams.get("projectId") === projectId;
+    if (selected) projectBoardReads += 1;
+    const status = selected && projectBoardReads > 1 ? "Review" : "Todo";
+    await route.fulfill({ json: { board: {
+      source: selected ? "project" : "repository",
+      ...(selected ? { projectId, statusFieldId: "STATUS" } : {}),
+      statuses: [{ id: "TODO", name: "Todo" }, { id: "REVIEW", name: "Review" }],
+      issues: [{ id: "live-issue", nodeId: "I_LIVE", itemId: "ITEM_LIVE", number: 8, title: "Changed by automation", body: "", state: "open", status, statusOptionId: status.toUpperCase(), url: "#", repository, labels: [], assignees: [], commentCount: 0, updatedAt: "2026-09-01T00:00:00Z" }],
+    } } });
+  });
+
+  await page.goto("/login");
+  await page.getByLabel("Пароль").fill("playwright-password");
+  await page.getByRole("button", { name: "Відкрити workspace" }).click();
+  const todo = page.getByRole("region", { name: "Todo column" });
+  const review = page.getByRole("region", { name: "Review column" });
+  await expect(page.locator("header select").nth(1)).toHaveValue(projectId);
+  await expect(page.getByText("GitHub Project", { exact: true })).toBeVisible();
+  await expect(todo.getByText("Changed by automation")).toBeVisible();
+
+  const body = JSON.stringify({
+    action: "edited",
+    projects_v2_item: { node_id: "PVTI_live", project_node_id: projectId },
+    changes: { field_value: { field_node_id: "STATUS", field_type: "single_select" } },
+    organization: { login: "acme" },
+  });
+  const signature = `sha256=${createHmac("sha256", "playwright-webhook-secret").update(body).digest("hex")}`;
+  const response = await request.post("/api/github/webhook", {
+    data: body,
+    headers: {
+      "content-type": "application/json",
+      "x-github-delivery": `playwright-live-delivery-${client}`,
+      "x-github-event": "projects_v2_item",
+      "x-hub-signature-256": signature,
+    },
+  });
+  expect(response.ok()).toBe(true);
+  await expect(review.getByText("Changed by automation")).toBeVisible();
+  expect(projectBoardReads).toBe(2);
 });

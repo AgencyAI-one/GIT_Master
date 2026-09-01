@@ -197,7 +197,7 @@ export class GitHubClient {
   async getProjectBoard(projectId: string, repository?: string): Promise<Board> {
     const query = `query($id:ID!){node(id:$id){... on ProjectV2{
       id fields(first:50){nodes{... on ProjectV2SingleSelectField{id name options{id name color}}}}
-      items(first:100){nodes{id fieldValues(first:30){nodes{... on ProjectV2ItemFieldSingleSelectValue{name optionId field{... on ProjectV2SingleSelectField{id name}}}}} content{
+      items(first:100,orderBy:{field:POSITION,direction:ASC}){nodes{id fieldValues(first:30){nodes{... on ProjectV2ItemFieldSingleSelectValue{name optionId field{... on ProjectV2SingleSelectField{id name}}}}} content{
         ... on Issue{id number title body state url updatedAt repository{nameWithOwner} author{login avatarUrl} labels(first:20){nodes{name color}} assignees(first:10){nodes{login avatarUrl}} comments{totalCount}}
       }}}
     }}}`;
@@ -295,6 +295,15 @@ export class GitHubClient {
       item: input.itemId,
       field: input.fieldId,
       option: input.optionId,
+    });
+  }
+
+  async updateProjectPosition(input: { projectId: string; itemId: string; afterId: string | null }) {
+    const mutation = `mutation($project:ID!,$item:ID!,$after:ID){updateProjectV2ItemPosition(input:{projectId:$project,itemId:$item,afterId:$after}){items{totalCount}}}`;
+    await this.graphql(mutation, {
+      project: input.projectId,
+      item: input.itemId,
+      after: input.afterId,
     });
   }
 
