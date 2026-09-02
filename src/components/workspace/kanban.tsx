@@ -16,8 +16,8 @@ function statusColor(status: StatusOption, index: number) {
   return ["#8b949e", "#7097d7", "#d29b36", "#986ad6", "#63a75f"][index % 5];
 }
 
-function relativeTime(date: string) {
-  const delta = Date.now() - new Date(date).getTime();
+function relativeTime(date: string, referenceTime: number) {
+  const delta = referenceTime - new Date(date).getTime();
   if (!Number.isFinite(delta)) return "";
   const minutes = Math.max(1, Math.round(delta / 60_000));
   if (minutes < 60) return `${minutes}хв`;
@@ -45,6 +45,7 @@ function IssueCard(props: {
   dragging: boolean;
   moving: boolean;
   dropBefore: boolean;
+  referenceTime: number;
 }) {
   const { issue } = props;
   return (
@@ -82,7 +83,7 @@ function IssueCard(props: {
           <div className="flex items-center gap-2 text-[10px] text-[#969b94]">
             {issue.commentCount > 0 && <span className="flex items-center gap-1"><MessageSquare size={11} />{issue.commentCount}</span>}
             {/!\[[^\]]*\]\(|\[[^\]]+\]\(http/.test(issue.body) && <Paperclip size={11} />}
-            <span className="flex items-center gap-1"><CalendarClock size={11} />{relativeTime(issue.updatedAt)}</span>
+            <span className="flex items-center gap-1"><CalendarClock size={11} /><time dateTime={issue.updatedAt}>{relativeTime(issue.updatedAt, props.referenceTime)}</time></span>
           </div>
           <div className="flex -space-x-1.5">
             {issue.assignees.slice(0, 3).map((assignee) => <img key={assignee.login} src={assignee.avatarUrl} title={assignee.login} alt={assignee.login} className="h-5 w-5 rounded-full border-2 border-white bg-[#e8eae5]" />)}
@@ -100,6 +101,7 @@ export function Kanban(props: {
   onCreate: (status: StatusOption) => void;
   onMove: (issue: BoardIssue, status: StatusOption, beforeIssue?: BoardIssue) => Promise<void> | void;
   moving?: string;
+  referenceTime: number;
 }) {
   const [dragged, setDragged] = useState<BoardIssue | null>(null);
   const [dropTarget, setDropTarget] = useState<{ statusId: string; index: number } | null>(null);
@@ -172,6 +174,7 @@ export function Kanban(props: {
                   dragging={Boolean(dragged && boardIssueKey(dragged) === boardIssueKey(issue))}
                   moving={props.moving === issue.id}
                   dropBefore={dropTarget?.statusId === status.id && dropTarget.index === issueIndex}
+                  referenceTime={props.referenceTime}
                 />
               ))}
               {dropTarget?.statusId === status.id && dropTarget.index === issues.length && issues.length > 0 && (
