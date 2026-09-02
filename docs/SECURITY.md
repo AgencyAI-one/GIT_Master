@@ -21,6 +21,8 @@
 - GitHub webhook bodies are accepted only when `X-Hub-Signature-256` matches the dedicated `GITHUB_WEBHOOK_SECRET` in a timing-safe comparison.
 - The live event stream requires the normal signed session and carries normalized identifiers rather than raw webhook payloads.
 - The Tauri companion exposes no native IPC commands to remote page content. Its global listener does not suppress, store, or log input and reacts only to left Alt plus cancellation gestures.
+- The native macOS companion grants microphone capture only to the configured server origin, opens cross-origin navigation in the default browser, rejects credentials in server URLs, and rejects plain HTTP outside loopback development.
+- The native macOS listener is passive. It receives key codes, modifier state, and mouse-button events needed to match configurable shortcuts, cannot suppress or rewrite them, and does not store or transmit typed text. Its menu keeps only the latest event metadata and action source in process memory for diagnostics.
 
 ## Deployment requirements
 
@@ -39,7 +41,7 @@ The built-in login rate limiter is in memory and applies per application instanc
 
 Live event fan-out is also in memory. Multi-instance deployments need authenticated shared pub/sub so a webhook delivered to one instance reaches clients connected to another.
 
-Global left-Alt control requires operating-system input permissions. On macOS, grant Accessibility only to the signed Git Master companion build you trust. Linux global control is X11-only; Wayland users should use the focused-window shortcut until a portal-based modifier-key API is available.
+Global shortcut control requires operating-system input permissions. On macOS, grant Accessibility and Input Monitoring only to the exact installed and signed Git Master build you trust; the native Xcode companion uses configurable shortcuts with Right Option as its default. The Tauri companion uses Left Alt. Linux global control is X11-only; Wayland users should use the focused-window shortcut until a portal-based modifier-key API is available.
 
 GitHub attachment commits are visible to everyone who can read the target repository. Do not upload secrets or files with a broader audience than the issue.
 

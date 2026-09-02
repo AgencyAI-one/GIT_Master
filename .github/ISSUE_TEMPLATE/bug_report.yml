@@ -20,4 +20,4 @@ body:
   - type: dropdown
     attributes:
       label: Deployment
-      options: [Docker, Node.js, Other]
+      options: [Docker, Node.js, Native macOS companion (Xcode), Tauri desktop companion, Other]

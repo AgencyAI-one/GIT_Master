@@ -7,6 +7,7 @@ Git Master is a single-process Next.js application designed for self-hosting. It
 ```mermaid
 sequenceDiagram
   participant U as Browser
+  participant M as Native macOS companion
   participant T as Tauri companion
   participant A as Git Master API
   participant D as Encrypted SQLite
@@ -14,7 +15,8 @@ sequenceDiagram
   participant O as OpenAI API
   participant W as GitHub Webhook
 
-  T->>U: Global Alt pressed/released/cancelled
+  M->>U: Configurable global shortcut events
+  T->>U: Global Left Alt pressed/released/cancelled
   U->>A: Signed HTTP-only session
   A->>D: Read encrypted connection
   D-->>A: AES-GCM ciphertext
@@ -45,7 +47,8 @@ src/lib/auth.ts          Password sessions
 src/lib/crypto.ts        AES-256-GCM token envelope
 src/lib/github-webhook.ts Webhook verification and event normalization
 src/lib/live-events.ts   Single-process SSE pub/sub and board matching
-src-tauri/               Optional native global-Alt companion
+mac_xcode_app_shortcut/  Native macOS companion, Xcode project, and release scripts
+src-tauri/               Optional cross-platform global-Left-Alt companion
 tests/                   Unit, adapter, and browser tests
 ```
 
@@ -70,9 +73,11 @@ The browser holds one authenticated `EventSource` connection to `/api/events`. G
 
 The event hub is intentionally in process, matching Git Master's single-process self-hosting model. A multi-instance deployment must replace or bridge it with shared pub/sub. Organization ProjectV2 webhooks can target a board by exact project node ID. Repository issue events target the exact `owner/repository` name.
 
-## Desktop boundary
+## Companion boundaries
 
-Tauri is a companion shell, not a second backend. It loads `GIT_MASTER_URL`, keeps the normal signed web session in the operating-system WebView, and sends native key-state events into the same React command flow. It never reads SQLite, GitHub tokens, the OpenAI key, or the app password. No Tauri IPC command is exposed to the remotely loaded page.
+Both desktop clients are companion shells, not second backends. They keep the normal signed web session in an operating-system WebView and send native key-state events into the same React command flow. Neither client reads SQLite, GitHub tokens, the OpenAI key, or the app password.
+
+The Swift macOS companion stores its configured URL and shortcut bindings in `UserDefaults`, accepts remote HTTPS or loopback HTTP, and restricts microphone capture to the configured origin. Cross-origin navigation leaves its privileged WebView and opens in the default browser. The Tauri companion loads `GIT_MASTER_URL` and exposes no native IPC command to the remotely loaded page.
 
 ## Persistence
 

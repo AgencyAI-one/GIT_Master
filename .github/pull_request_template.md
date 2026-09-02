@@ -4,6 +4,7 @@
 
 - [ ] `npm run check`
 - [ ] Relevant browser flow tested
+- [ ] Relevant native macOS companion checks run on macOS
 - [ ] Documentation updated
 
 ## Security / data impact

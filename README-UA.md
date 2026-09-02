@@ -23,7 +23,7 @@ Git Master — це open-source інструмент для самостійно
 - Вставлення кількох голосових фрагментів точно в позицію курсора
 - Автоматичне створення назви issue з опису зі збереженням його мови
 - Українські, англійські та змішані українсько-англійські команди й диктування
-- Одноклавішний push-to-talk через **Alt** у сфокусованому web app або глобально через необов'язковий Tauri desktop companion
+- Одноклавішний push-to-talk у сфокусованому web app, глобально на macOS через нативний Xcode companion або cross-platform через необов'язковий Tauri companion
 - Подієві оновлення дошки через підписані GitHub webhooks і SSE без постійного polling
 - Передавання issues зі статусом `Ready` у Codex CLI або Claude Code через супутній проєкт [AI Git Task Processing Skills](https://github.com/AgencyAI-one/ai-git-task-processing-skills)
 - Зашифроване зберігання токенів, пароль із env, підписані сесії, обмеження частоти входу й security headers
@@ -92,10 +92,12 @@ Alt -> «Збережи і закрий задачу»
 - Двічі швидко натисніть **Alt**, щоб запис продовжувався без утримування. Наступне одинарне або подвійне натискання зупинить його.
 - Якщо під час утримування Alt натиснути іншу клавішу або кнопку миші, Git Master відкине спробу запису. **Alt+Tab**, **Alt+N** і меню інших програм продовжують працювати звичайно.
 - Натисніть **Alt+N**, щоб відкрити нову задачу в активному репозиторії.
-- Відкрийте **Налаштування -> Гарячі клавіші**, щоб змінити shortcuts для сфокусованої web-версії. Налаштування зберігаються локально в поточному браузері. Desktop companion навмисно резервує лівий Alt як глобальну голосову кнопку.
+- Відкрийте **Налаштування -> Гарячі клавіші**, щоб змінити shortcuts для сфокусованої web-версії. Налаштування зберігаються локально в поточному браузері. Cross-platform Tauri companion навмисно резервує лівий Alt як глобальну голосову кнопку.
 - Комбінація без Ctrl, Alt, Shift або Meta не перехоплюється під час набору в input, textarea, select чи editable-полі, тому не заважає звичайному введенню.
 
 Кнопка **Голос** усередині заголовка, опису або коментаря працює лише для відповідного поля й вставляє транскрипцію в позицію курсора. Так один документ можна природно складати з кількох голосових фрагментів, ручного тексту й вкладень.
+
+Ці стандартні значення Left Alt описують browser і Tauri clients. Нативний macOS companion використовує **Right Option**, показує live-стан shortcuts у menu bar і дозволяє змінити обидва глобальні bindings.
 
 ### Задачі й коментарі
 
@@ -185,7 +187,24 @@ npm run dev -- --port 5173
 
 Потрібен Node.js 22+; у Docker і CI використовується Node.js 24. Тільки в development-режимі Git Master використовує резервний пароль `gitmaster`. Production не запуститься без `APP_PASSWORD`, `APP_SECRET` довжиною щонайменше 32 символи та `ENCRYPTION_KEY`.
 
-## Desktop companion і глобальне голосове керування через Alt
+## Нативний macOS companion, зібраний у Xcode
+
+Користувачі Mac, яким потрібні надійні глобальні shortcuts під час роботи в Xcode або іншій програмі, можуть використовувати нативний Swift companion із [`mac_xcode_app_shortcut`](mac_xcode_app_shortcut/README-UA.md). Це звичайний macOS app, зібраний у Xcode, а не Xcode extension; він завантажує той самий сервер Git Master у постійному WebKit view.
+
+Стандартні клавіші — **Right Option** для push-to-talk і **Command-Shift-N** для New Issue. Menu bar показує live-активність мікрофона і створення задачі. Accessibility вмикає основний global listener, Input Monitoring дає fallback, а Microphone запитується при першому голосовому вводі.
+
+На Mac із Xcode 15 або новішим:
+
+```bash
+cd mac_xcode_app_shortcut
+./scripts/doctor.sh
+./scripts/test.sh
+./scripts/build-dmg.sh
+```
+
+Стандартна команда створює локально ad-hoc signed `build/Git-Master-1.0.0.dmg`; публічні релізи можуть використовувати той самий скрипт із Developer ID та credentials для `notarytool`. Повний [macOS guide](mac_xcode_app_shortcut/README-UA.md) описує build із source-коду, встановлення, використання, permissions, налаштування shortcuts, signing, notarization, privacy і troubleshooting.
+
+## Cross-platform Tauri companion і глобальне керування через Left Alt
 
 Необов'язковий Tauri companion залишає наявний Next.js app і сервер єдиним джерелом даних. Він відкриває налаштований Git Master URL у системному WebView і додає одну native-можливість: події натискання та відпускання лівого Alt, навіть коли фокус має інша вкладка, IDE чи програма. Companion не отримує GitHub/OpenAI secrets і не відкриває native IPC-команди для віддаленого контенту сторінки.
 
@@ -325,7 +344,8 @@ GitHub не має публічного endpoint для завантаження
 ```mermaid
 flowchart LR
   Browser[Next.js client\nkanban + editor + recorder] --> API[Authenticated route handlers]
-  Desktop[Tauri companion\nglobal Alt events] --> Browser
+  NativeMac[Native macOS companion\nRight Option + menu bar] --> Browser
+  Tauri[Tauri companion\nglobal Left Alt events] --> Browser
   GitHubHook[GitHub webhooks] --> Hook[HMAC-verified webhook route]
   Hook --> SSE[Authenticated SSE clients]
   SSE --> Browser
@@ -350,7 +370,7 @@ flowchart LR
 | `GITHUB_API_URL` | Ні | Типово `https://api.github.com`; підтримує GitHub Enterprise API roots |
 | `GITHUB_UPLOAD_BRANCH` | Ні | Гілка для комітів із вкладеннями |
 | `GITHUB_WEBHOOK_SECRET` | Для live-оновлень | Окремий HMAC secret, відомий лише Git Master і налаштованому GitHub webhook |
-| `GIT_MASTER_URL` | Лише desktop | URL сервера для Tauri; типово `http://127.0.0.1:5173` |
+| `GIT_MASTER_URL` | Лише Tauri | URL сервера для Tauri; типово `http://127.0.0.1:5173` |
 
 ## Перевірка
 
