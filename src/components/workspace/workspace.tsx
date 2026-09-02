@@ -44,29 +44,30 @@ import { SettingsDialog } from "./settings-dialog";
 import { Toasts, type ToastMessage } from "./toast";
 import { VoiceCommandCenter, type VoiceCommandHandle } from "./voice-command";
 
-const now = Date.now();
-const demoIssues: BoardIssue[] = [
-  {
-    id: "demo-1", nodeId: "demo-1", number: 42, title: "Додати голосове створення issues українською", body: "Підтримати контекстне доповнення опису кількома голосовими фрагментами.", state: "open", status: "In progress", url: "#", repository: "git-master/app", labels: [{ name: "voice", color: "b9ec55" }, { name: "feature", color: "dbeafe" }], author: undefined, assignees: [], commentCount: 4, updatedAt: new Date(now - 3_600_000).toISOString(),
-  },
-  {
-    id: "demo-2", nodeId: "demo-2", number: 39, title: "Підключення GitHub organization з вибором репозиторіїв", body: "", state: "open", status: "Todo", url: "#", repository: "git-master/app", labels: [{ name: "github", color: "c5def5" }], author: undefined, assignees: [], commentCount: 1, updatedAt: new Date(now - 86_400_000).toISOString(),
-  },
-  {
-    id: "demo-3", nodeId: "demo-3", number: 36, title: "Завантаження скриншотів у коментарі", body: "![attachment](demo)", state: "open", status: "Review", url: "#", repository: "git-master/app", labels: [{ name: "ux", color: "efd6ff" }], author: undefined, assignees: [], commentCount: 3, updatedAt: new Date(now - 172_800_000).toISOString(),
-  },
-  {
-    id: "demo-4", nodeId: "demo-4", number: 31, title: "Налаштувати encrypted storage для access tokens", body: "", state: "closed", status: "Done", url: "#", repository: "git-master/app", labels: [{ name: "security", color: "f9d0c4" }], author: undefined, assignees: [], commentCount: 2, updatedAt: new Date(now - 345_600_000).toISOString(),
-  },
-  {
-    id: "demo-5", nodeId: "demo-5", number: 45, title: "Додати шаблони для bug report та feature request", body: "", state: "open", status: "Backlog", url: "#", repository: "git-master/app", labels: [{ name: "enhancement", color: "a2eeef" }], author: undefined, assignees: [], commentCount: 0, updatedAt: new Date(now - 43_200_000).toISOString(),
-  },
-  {
-    id: "demo-6", nodeId: "demo-6", number: 41, title: "Command palette для швидкої навігації", body: "", state: "open", status: "Todo", url: "#", repository: "git-master/app", labels: [{ name: "frontend", color: "fef2c0" }], author: undefined, assignees: [], commentCount: 2, updatedAt: new Date(now - 65_000_000).toISOString(),
-  },
-];
+function createDemoBoard(referenceTime: number): Board {
+  const demoIssues: BoardIssue[] = [
+    {
+      id: "demo-1", nodeId: "demo-1", number: 42, title: "Додати голосове створення issues українською", body: "Підтримати контекстне доповнення опису кількома голосовими фрагментами.", state: "open", status: "In progress", url: "#", repository: "git-master/app", labels: [{ name: "voice", color: "b9ec55" }, { name: "feature", color: "dbeafe" }], author: undefined, assignees: [], commentCount: 4, updatedAt: new Date(referenceTime - 3_600_000).toISOString(),
+    },
+    {
+      id: "demo-2", nodeId: "demo-2", number: 39, title: "Підключення GitHub organization з вибором репозиторіїв", body: "", state: "open", status: "Todo", url: "#", repository: "git-master/app", labels: [{ name: "github", color: "c5def5" }], author: undefined, assignees: [], commentCount: 1, updatedAt: new Date(referenceTime - 86_400_000).toISOString(),
+    },
+    {
+      id: "demo-3", nodeId: "demo-3", number: 36, title: "Завантаження скриншотів у коментарі", body: "![attachment](demo)", state: "open", status: "Review", url: "#", repository: "git-master/app", labels: [{ name: "ux", color: "efd6ff" }], author: undefined, assignees: [], commentCount: 3, updatedAt: new Date(referenceTime - 172_800_000).toISOString(),
+    },
+    {
+      id: "demo-4", nodeId: "demo-4", number: 31, title: "Налаштувати encrypted storage для access tokens", body: "", state: "closed", status: "Done", url: "#", repository: "git-master/app", labels: [{ name: "security", color: "f9d0c4" }], author: undefined, assignees: [], commentCount: 2, updatedAt: new Date(referenceTime - 345_600_000).toISOString(),
+    },
+    {
+      id: "demo-5", nodeId: "demo-5", number: 45, title: "Додати шаблони для bug report та feature request", body: "", state: "open", status: "Backlog", url: "#", repository: "git-master/app", labels: [{ name: "enhancement", color: "a2eeef" }], author: undefined, assignees: [], commentCount: 0, updatedAt: new Date(referenceTime - 43_200_000).toISOString(),
+    },
+    {
+      id: "demo-6", nodeId: "demo-6", number: 41, title: "Command palette для швидкої навігації", body: "", state: "open", status: "Todo", url: "#", repository: "git-master/app", labels: [{ name: "frontend", color: "fef2c0" }], author: undefined, assignees: [], commentCount: 2, updatedAt: new Date(referenceTime - 65_000_000).toISOString(),
+    },
+  ];
 
-const initialDemoBoard: Board = { source: "demo", statuses: FALLBACK_STATUSES, issues: demoIssues };
+  return { source: "demo", statuses: FALLBACK_STATUSES, issues: demoIssues };
+}
 
 function desktopCompanionControlsAlt() {
   return Boolean((window as typeof window & { __GIT_MASTER_DESKTOP__?: boolean }).__GIT_MASTER_DESKTOP__);
@@ -80,8 +81,9 @@ function repositoryBoardOrderKey(connectionId: string, repository: string) {
   return `git-master-board-order:${connectionId}:${repository}`;
 }
 
-export function Workspace() {
+export function Workspace({ initialTime }: { initialTime: number }) {
   const router = useRouter();
+  const initialDemoBoard = useMemo(() => createDemoBoard(initialTime), [initialTime]);
   const [connections, setConnections] = useState<Connection[]>([]);
   const [connectionId, setConnectionId] = useState("");
   const [repositories, setRepositories] = useState<Repository[]>([]);
@@ -105,11 +107,17 @@ export function Workspace() {
   const [shortcuts, setShortcuts] = useState<ShortcutSettings>(DEFAULT_SHORTCUTS);
   const [voiceCommands, setVoiceCommands] = useState<VoiceCommandSettings>(DEFAULT_VOICE_COMMANDS);
   const [voiceLatched, setVoiceLatched] = useState(false);
+  const [relativeTimeReference, setRelativeTimeReference] = useState(initialTime);
   const boardRequestId = useRef(0);
   const liveRefreshTimer = useRef<number | null>(null);
   const voiceCenterRef = useRef<VoiceCommandHandle>(null);
   const activeVoiceKeyRef = useRef("");
   const pushToTalkRef = useRef<PushToTalkController | null>(null);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setRelativeTimeReference(Date.now()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const controller = new PushToTalkController(
@@ -167,7 +175,7 @@ export function Workspace() {
     } finally {
       setLoadingWorkspace(false);
     }
-  }, [connectionId, notify]);
+  }, [connectionId, initialDemoBoard, notify]);
 
   useEffect(() => { void loadConnections(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -641,7 +649,7 @@ export function Workspace() {
             {loadingBoard && (
               <div className="absolute inset-0 z-10 grid place-items-center bg-[#f5f6f2]/70 backdrop-blur-[1px]"><div className="flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-medium shadow"><LoaderCircle size={15} className="animate-spin text-[#739d30]" /> Синхронізація з GitHub</div></div>
             )}
-            <Kanban board={visibleBoard} onOpen={openIssue} onCreate={newIssue} onMove={async (issue, status, beforeIssue) => { await moveIssue(issue, status, beforeIssue); }} moving={moving} />
+            <Kanban board={visibleBoard} referenceTime={relativeTimeReference} onOpen={openIssue} onCreate={newIssue} onMove={async (issue, status, beforeIssue) => { await moveIssue(issue, status, beforeIssue); }} moving={moving} />
           </div>
         </div>
       </section>
