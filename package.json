@@ -23,7 +23,7 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
-    "better-sqlite3": "^12.4.1",
+    "better-sqlite3": "^13.0.3",
     "clsx": "^2.1.1",
     "lucide-react": "^0.542.0",
     "motion": "^12.23.12",
